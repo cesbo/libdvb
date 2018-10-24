@@ -186,30 +186,67 @@ impl Default for Rof {
     fn default() -> Rof { Rof::ROF_35 }
 }
 
-/// DVB-S/S2 Options
-#[derive(Debug)]
-pub struct DvbS {
-    /// Transponder frequency
+/// DVB-S/S2 Transponder
+#[derive(Default, Debug)]
+pub struct Transponder {
+    /// Frequency
     frequency: usize,
-    /// Transponder polarization
+    /// Polarization
     polarization: Polarization,
-    /// Transponder symbol-rate
+    /// Symbol-rate
     symbol_rate: usize,
+}
 
-    /// LNB mode
+/// DVB-S/S2 LNB
+#[derive(Default, Debug)]
+pub struct Lnb {
+    /// Mode
     lnb: LnbMode,
-    /// LNB Low band frequency
+    /// Low band frequency
     lof1: usize,
-    /// LNB High band frequency
+    /// High band frequency
     lof2: usize,
-    /// LNB Threshold frequency - threshold between low and high band
+    /// Threshold frequency - threshold between low and high band
     slof: usize,
+}
 
-    /// FEC
+/// DVB-S Options
+#[derive(Default, Debug)]
+pub struct DvbS {
+    transponder: Transponder,
+    lnb: Lnb,
+    modulation: Modulation,
     fec: Fec,
+}
 
-    /// DVB-S2 Roll-off factor
+/// DVB-S2 Options
+#[derive(Debug)]
+pub struct DvbS2 {
+    transponder: Transponder,
+    lnb: Lnb,
+    modulation: Modulation,
+    fec: Fec,
     rof: Rof,
+}
+
+/// DVB Delivery system
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum DvbSystem {
+    NONE,
+    DVB_S(DvbS),
+    DVB_S2(DvbS2),
+}
+
+/// DVB Options
+#[derive(Debug)]
+pub struct DvbOptions {
+    /// Adapter number /dev/dvb/adapterX
+    adapter: usize,
+    /// Device number /dev/dvb/adapterX/frontendX
+    device: usize,
+    /// Delivery system
+    system: DvbSystem,
 }
 
 #[derive(Debug)]
