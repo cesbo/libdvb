@@ -75,6 +75,143 @@ impl fmt::Debug for dvb_frontend_info {
     }
 }
 
+/// Modulation
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum Modulation {
+    /// Depend of delivery system.
+    AUTO,
+    NONE,
+    PSK_8,
+    QPSK,
+    QAM_16,
+    QAM_32,
+    QAM_64,
+    QAM_128,
+    QAM_256,
+    VSB_8,
+    VSB_16,
+    APSK_16,
+    APSK_32,
+    DQPSK,
+}
+
+impl Default for Modulation {
+    fn default() -> Modulation { Modulation::AUTO }
+}
+
+/// FEC - Forward Error Correction
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum Fec {
+    AUTO,
+    NONE,
+    FEC_1_2,
+    FEC_2_3,
+    FEC_3_4,
+    FEC_4_5,
+    FEC_5_6,
+    FEC_6_7,
+    FEC_7_8,
+    FEC_8_9,
+    FEC_3_5,
+    FEC_9_10,
+}
+
+impl Default for Fec {
+    fn default() -> Fec { Fec::AUTO }
+}
+
+/// DVB-S/S2 Transponder polarization
+#[derive(Debug)]
+pub enum Polarization {
+    /// Vertical linear. Right circular. 13 volt
+    VR,
+    /// Horizontal linear. Left circular. 18 volt
+    HL,
+    /// Disable LNB power
+    OFF,
+}
+
+impl Default for Polarization {
+    fn default() -> Polarization { Polarization::OFF }
+}
+
+/// DVB-S/S2 Unicable options
+#[derive(Default, Debug)]
+pub struct Unicable10 {
+    /// Slot range from 1 to 8
+    slot: usize,
+    /// Frequency range from 950 to 2150 MHz
+    frequency: usize,
+    /// Position range from 1 to 2
+    position: usize,
+}
+
+/// DVB-S/S2 LNB mode
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum LnbMode {
+    /// Send 22kHz tone to LNB if frequency greater or equal to slof
+    AUTO,
+    /// Send 22kHz tone to LNB
+    TONE,
+    /// Tone Burst port range from 1 to 2
+    TONEBURST(usize),
+    /// DiSEqC 1.0 port range from 1 to 4
+    DISEQC_1_0(usize),
+    /// DiSEqC 1.1 port range from 1 to 16
+    DISEQC_1_1(usize),
+    /// EN50494 / Unicable
+    UNICABLE_1_0(Unicable10),
+    /// Disable LNB
+    OFF,
+}
+
+impl Default for LnbMode {
+    fn default() -> LnbMode { LnbMode::AUTO }
+}
+
+/// DVB-S2 Roll-off
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum Rof {
+    AUTO,
+    ROF_20,
+    ROF_25,
+    ROF_35,
+}
+
+impl Default for Rof {
+    fn default() -> Rof { Rof::ROF_35 }
+}
+
+/// DVB-S/S2 Options
+#[derive(Debug)]
+pub struct DvbS {
+    /// Transponder frequency
+    frequency: usize,
+    /// Transponder polarization
+    polarization: Polarization,
+    /// Transponder symbol-rate
+    symbol_rate: usize,
+
+    /// LNB mode
+    lnb: LnbMode,
+    /// LNB Low band frequency
+    lof1: usize,
+    /// LNB High band frequency
+    lof2: usize,
+    /// LNB Threshold frequency - threshold between low and high band
+    slof: usize,
+
+    /// FEC
+    fec: Fec,
+
+    /// DVB-S2 Roll-off factor
+    rof: Rof,
+}
+
 #[derive(Debug)]
 pub struct DvbTune {
     fd: RawFd,
