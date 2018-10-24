@@ -4,6 +4,7 @@ use std::{io, mem};
 use std::os::unix::io::RawFd;
 
 pub const FE_GET_INFO: libc::c_ulong = 2158522173; /* _IOR('o', 61, sizeof(dvb_frontend_info)) */
+pub const FE_GET_EVENT: libc::c_ulong = 2150133582; /* _IOR('o', 78, struct dvb_frontend_event) */
 pub const FE_SET_PROPERTY: libc::c_ulong = 1074818898; /* _IOW('o', 82, struct dtv_properties) */
 
 //
@@ -59,13 +60,65 @@ pub struct dvb_frontend_info {
 	pub caps: fe_caps,
 }
 
-unsafe fn get_dvb_frontend_info(fd: RawFd) -> io::Result<dvb_frontend_info> {
-    let mut feinfo: dvb_frontend_info = mem::zeroed();
-    let x = libc::ioctl(fd, FE_GET_INFO, &mut feinfo as *mut dvb_frontend_info as *mut libc::c_void);
+impl dvb_frontend_info {
+    pub fn new() -> dvb_frontend_info {
+        unsafe { mem::zeroed::<dvb_frontend_info>() }
+    }
+}
+
+fn get_dvb_frontend_info(fd: RawFd, info: &mut dvb_frontend_info) -> io::Result<()> {
+    let x = unsafe {
+        libc::ioctl(fd, FE_GET_INFO, info as *mut dvb_frontend_info as *mut libc::c_void)
+    };
+
     if x == -1 {
         Err(io::Error::last_os_error())
     } else {
-        Ok(feinfo)
+        Ok(())
+    }
+}
+
+//
+
+#[repr(C, packed)]
+pub struct dvb_frontend_parameters {
+    pub frequency: u32,
+    reserved: [u8; 32],
+}
+
+bitflags! {
+    pub struct fe_status: u32 {
+        const FE_NONE = 0x00;
+        const FE_HAS_SIGNAL = 0x01;
+        const FE_HAS_CARRIER = 0x02;
+        const FE_HAS_VITERBI = 0x04;
+        const FE_HAS_SYNC = 0x08;
+        const FE_HAS_LOCK = 0x10;
+        const FE_TIMEDOUT = 0x20;
+        const FE_REINIT = 0x40;
+    }
+}
+
+#[repr(C, packed)]
+pub struct dvb_frontend_event {
+    pub status: fe_status,
+    pub parameters: dvb_frontend_parameters,
+}
+
+impl dvb_frontend_event {
+    pub fn new() -> dvb_frontend_event {
+        unsafe { mem::zeroed::<dvb_frontend_event>() }
+    }
+}
+
+fn get_dvb_frontend_event(fd: RawFd, event: &mut dvb_frontend_event) -> io::Result<()> {
+    let x = unsafe {
+        libc::ioctl(fd, FE_GET_INFO, event as *mut dvb_frontend_event as *mut libc::c_void)
+    };
+    if x == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -267,9 +320,8 @@ impl DvbTune {
             DvbOptions::DVB_S2(v) => {
                 let fd = v.adapter.open()?;
 
-                let feinfo = unsafe {
-                    get_dvb_frontend_info(fd)?
-                };
+                let mut feinfo = dvb_frontend_info::new();
+                get_dvb_frontend_info(fd, &mut feinfo)?;
 
                 // TODO: continue here...
                 // DvbS::tune(v)?;
