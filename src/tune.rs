@@ -42,7 +42,6 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
 pub struct dvb_frontend_info {
     pub name: [libc::c_char; 128],
 	pub fe_type: i32, /* DEPRECATED. Use DTV_ENUM_DELSYS instead */
@@ -75,6 +74,40 @@ impl fmt::Debug for dvb_frontend_info {
     }
 }
 
+unsafe fn get_dvb_frontend_info(fd: RawFd) -> io::Result<dvb_frontend_info> {
+    let mut feinfo: dvb_frontend_info = mem::zeroed();
+    let x = libc::ioctl(fd, FE_GET_INFO, &mut feinfo as *mut dvb_frontend_info as *mut libc::c_void);
+    if x == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(feinfo)
+    }
+}
+
+/// Adapter
+#[derive(Debug)]
+pub struct Adapter {
+    /// Adapter number /dev/dvb/adapterX
+    pub adapter: usize,
+    /// Device number /dev/dvb/adapterX/frontendX
+    pub device: usize,
+}
+
+impl Adapter {
+    pub fn open(&self) -> io::Result<RawFd> {
+        let path = format!("/dev/dvb/adapter{}/frontend{}", self.adapter, self.device);
+        let fd = unsafe {
+            libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
+        };
+
+        if fd == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(fd)
+        }
+    }
+}
+
 /// Modulation
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -96,10 +129,6 @@ pub enum Modulation {
     DQPSK,
 }
 
-impl Default for Modulation {
-    fn default() -> Modulation { Modulation::AUTO }
-}
-
 /// FEC - Forward Error Correction
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -118,10 +147,6 @@ pub enum Fec {
     FEC_9_10,
 }
 
-impl Default for Fec {
-    fn default() -> Fec { Fec::AUTO }
-}
-
 /// DVB-S/S2 Transponder polarization
 #[derive(Debug)]
 pub enum Polarization {
@@ -133,19 +158,15 @@ pub enum Polarization {
     OFF,
 }
 
-impl Default for Polarization {
-    fn default() -> Polarization { Polarization::OFF }
-}
-
 /// DVB-S/S2 Unicable options
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Unicable10 {
     /// Slot range from 1 to 8
-    slot: usize,
+    pub slot: usize,
     /// Frequency range from 950 to 2150 MHz
-    frequency: usize,
+    pub frequency: usize,
     /// Position range from 1 to 2
-    position: usize,
+    pub position: usize,
 }
 
 /// DVB-S/S2 LNB mode
@@ -168,10 +189,6 @@ pub enum LnbMode {
     OFF,
 }
 
-impl Default for LnbMode {
-    fn default() -> LnbMode { LnbMode::AUTO }
-}
-
 /// DVB-S2 Roll-off
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
@@ -182,107 +199,83 @@ pub enum Rof {
     ROF_35,
 }
 
-impl Default for Rof {
-    fn default() -> Rof { Rof::ROF_35 }
-}
-
 /// DVB-S/S2 Transponder
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Transponder {
     /// Frequency
-    frequency: usize,
+    pub frequency: usize,
     /// Polarization
-    polarization: Polarization,
+    pub polarization: Polarization,
     /// Symbol-rate
-    symbol_rate: usize,
+    pub symbolrate: usize,
 }
 
 /// DVB-S/S2 LNB
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct Lnb {
     /// Mode
-    lnb: LnbMode,
+    pub mode: LnbMode,
     /// Low band frequency
-    lof1: usize,
+    pub lof1: usize,
     /// High band frequency
-    lof2: usize,
+    pub lof2: usize,
     /// Threshold frequency - threshold between low and high band
-    slof: usize,
+    pub slof: usize,
 }
 
 /// DVB-S Options
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct DvbS {
-    transponder: Transponder,
-    lnb: Lnb,
-    modulation: Modulation,
-    fec: Fec,
+    pub adapter: Adapter,
+    pub transponder: Transponder,
+    pub lnb: Lnb,
+    pub modulation: Modulation,
+    pub fec: Fec,
 }
 
 /// DVB-S2 Options
 #[derive(Debug)]
 pub struct DvbS2 {
-    transponder: Transponder,
-    lnb: Lnb,
-    modulation: Modulation,
-    fec: Fec,
-    rof: Rof,
+    pub adapter: Adapter,
+    pub transponder: Transponder,
+    pub lnb: Lnb,
+    pub modulation: Modulation,
+    pub fec: Fec,
+    pub rof: Rof,
 }
 
 /// DVB Delivery system
 #[allow(non_camel_case_types)]
 #[derive(Debug)]
-pub enum DvbSystem {
-    NONE,
-    DVB_S(DvbS),
+pub enum DvbOptions {
     DVB_S2(DvbS2),
-}
-
-/// DVB Options
-#[derive(Debug)]
-pub struct DvbOptions {
-    /// Adapter number /dev/dvb/adapterX
-    adapter: usize,
-    /// Device number /dev/dvb/adapterX/frontendX
-    device: usize,
-    /// Delivery system
-    system: DvbSystem,
 }
 
 #[derive(Debug)]
 pub struct DvbTune {
     fd: RawFd,
+    feinfo: dvb_frontend_info,
 }
 
 impl DvbTune {
-    pub fn new(adapter: usize, device: usize) -> io::Result<DvbTune> {
-        let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
+    pub fn new(options: &DvbOptions) -> io::Result<DvbTune> {
+        println!("{:#?}", options);
 
-        let fd = unsafe {
-            let fd = libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR);
-            if fd == -1 {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(fd)
-            }
-        }?;
+        match options {
+            DvbOptions::DVB_S2(v) => {
+                let fd = v.adapter.open()?;
 
-        let feinfo = unsafe {
-            let mut feinfo: dvb_frontend_info = mem::zeroed();
-            let x = libc::ioctl(fd, FE_GET_INFO, &mut feinfo as *mut dvb_frontend_info as *mut libc::c_void);
-            if x == -1 {
-                libc::close(fd);
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(feinfo)
-            }
-        }?;
+                let feinfo = unsafe {
+                    get_dvb_frontend_info(fd)?
+                };
+                println!("{:#?}", feinfo);
 
-        println!("{:#?}", feinfo);
+                // TODO: continue here...
+                // DvbS::tune(v)?;
 
-        Ok(DvbTune {
-            fd,
-        })
+                Ok(DvbTune{ fd, feinfo, })
+            },
+        }
     }
 }
 
