@@ -1,3 +1,5 @@
+/// Library level frontend API
+
 use frontend;
 
 use std::io;
@@ -6,7 +8,7 @@ use std::os::unix::io::RawFd;
 /// Adapter
 pub struct Adapter {
     /// Adapter number /dev/dvb/adapterX
-    pub adapter: usize,
+    pub id: usize,
     /// Device number /dev/dvb/adapterX/frontendX
     pub device: usize,
 }
@@ -144,35 +146,68 @@ pub enum DvbOptions {
 }
 
 /// DVB Instance
+#[derive(Default)]
 pub struct DvbTune {
     fd: RawFd,
     feinfo: frontend::Info,
 }
 
 impl DvbTune {
+    /// Clears frontend and event queue
+    fn clear(&self) -> io::Result<()> {
+        let mut cmdseq = Properties::default();
+        cmdseq.num = 1;
+        cmdseq.props[0].cmd = DTV_CLEAR;
+        cmdseq.write(fd)?;
+
+        let mut e = Event::default();
+        while let Ok(_) = e.read(fd) {};
+
+        Ok(())
+    }
+
+    /// Closes frontend
+    pub fn close(&mut self) {
+        if self.fd > 0 {
+            self.clear().unwrap();
+            unsafe { libc::close(self.fd) };
+            self.fd = 0;
+        }
+    }
+
+    /// Opens fronted
+    fn open(&mut self, adapter: &Adapter) -> io::Result<()> {
+        let path = format!("/dev/dvb/adapter{}/frontend{}", adapter.id, adapter.device);
+        let fd = unsafe {
+            libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
+        };
+
+        if fd == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(fd)
+        }
+    }
+
     pub fn new(options: &DvbOptions) -> io::Result<DvbTune> {
+        let mut x = DvbTune::default();
+
         match options {
             DvbOptions::DVB_S2(v) => {
-                let fd = frontend::open(v.adapter.adapter, v.adapter.device)?;
-
-                let mut feinfo = frontend::Info::new();
-                feinfo.read(fd)?;
+                x.open(&v.adapter)?;
+                x.feinfo.read(x.fd)?;
 
                 // TODO: continue here...
                 // DvbS::tune(v)?;
-
-                Ok(DvbTune{ fd, feinfo, })
             },
-        }
+        };
+
+        Ok(x)
     }
 }
 
 impl Drop for DvbTune {
     fn drop(&mut self) {
-        if self.fd > 0 {
-            frontend::clear(self.fd).unwrap();
-            frontend::close(self.fd);
-            self.fd = 0;
-        }
+        self.close();
     }
 }

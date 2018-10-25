@@ -1,3 +1,5 @@
+/// System level frontend API
+
 use libc;
 
 use std::{io, mem};
@@ -102,11 +104,13 @@ pub struct Info {
     pub caps: Caps,
 }
 
-impl Info {
-    pub fn new() -> Info {
+impl Default for Info {
+    fn default() -> Info {
         unsafe { mem::zeroed::<Info>() }
     }
+}
 
+impl Info {
     /// Reads frontend information
     pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
         let x = unsafe {
@@ -159,11 +163,13 @@ pub struct Event {
     pub parameters: Parameters,
 }
 
-impl Event {
-    pub fn new() -> Event {
+impl Default for Event {
+    fn default() -> Event {
         unsafe { mem::zeroed::<Event>() }
     }
+}
 
+impl Event {
     /// Reads frontend event
     pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
         let x = unsafe {
@@ -206,11 +212,13 @@ pub struct Properties {
     pub props: [Property; 20],
 }
 
-impl Properties {
-    pub fn new() -> Properties {
+impl Default for Properties {
+    fn default() -> Properties {
         unsafe { mem::zeroed::<Properties>() }
     }
+}
 
+impl Properties {
     /// Writes properties set into frontend
     pub fn write(&self, fd: RawFd) -> io::Result<()> {
         let x = unsafe {
@@ -222,36 +230,4 @@ impl Properties {
             Ok(())
         }
     }
-}
-
-/// Opens fronted
-pub fn open(adapter: usize, device: usize) -> io::Result<RawFd> {
-    let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
-    let fd = unsafe {
-        libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
-    };
-
-    if fd == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(fd)
-    }
-}
-
-/// Clears frontend and event queue
-pub fn clear(fd: RawFd) -> io::Result<()> {
-    let mut cmdseq = Properties::new();
-    cmdseq.num = 1;
-    cmdseq.props[0].cmd = DTV_CLEAR;
-    cmdseq.write(fd)?;
-
-    let mut e = Event::new();
-    while let Ok(_) = e.read(fd) {};
-
-    Ok(())
-}
-
-/// Closes frontend
-pub fn close(fd: RawFd) {
-    unsafe { libc::close(fd) };
 }
