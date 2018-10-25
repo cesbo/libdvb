@@ -170,6 +170,7 @@ impl DvbTune {
 impl Drop for DvbTune {
     fn drop(&mut self) {
         if self.fd > 0 {
+            frontend::clear(self.fd).unwrap();
             frontend::close(self.fd);
             self.fd = 0;
         }
