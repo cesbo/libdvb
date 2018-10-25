@@ -5,10 +5,25 @@ use libc;
 use std::{io, mem};
 use std::os::unix::io::RawFd;
 
-pub const FE_GET_INFO: libc::c_ulong = 2158522173; /* _IOR('o', 61, struct dvb_frontend_info) */
-pub const FE_READ_STATUS: libc::c_ulong = 2147774277; /* _IOR('o', 69, fe_status_t) */
-pub const FE_GET_EVENT: libc::c_ulong = 2150133582; /* _IOR('o', 78, struct dvb_frontend_event) */
-pub const FE_SET_PROPERTY: libc::c_ulong = 1074818898; /* _IOW('o', 82, struct dtv_properties) */
+pub const FE_GET_INFO: libc::c_ulong = 2158522173;
+
+pub const FE_READ_STATUS: libc::c_ulong = 2147774277;
+pub const FE_READ_BER: libc::c_ulong = 2147774278;
+pub const FE_READ_SIGNAL_STRENGTH: libc::c_ulong = 2147643207;
+pub const FE_READ_SNR: libc::c_ulong = 2147643208;
+pub const FE_READ_UNCORRECTED_BLOCKS: libc::c_ulong = 2147774281;
+
+pub const FE_GET_EVENT: libc::c_ulong = 2150133582;
+pub const FE_SET_PROPERTY: libc::c_ulong = 1074818898;
+
+#[inline]
+pub fn cvt(result: i32) -> io::Result<()> {
+    if result == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
 
 bitflags! {
     /// Frontend capabilities
@@ -114,15 +129,9 @@ impl Default for Info {
 impl Info {
     /// Reads frontend information
     pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
-        let x = unsafe {
-            libc::ioctl(fd, FE_GET_INFO, self as *mut Info as *mut libc::c_void)
-        };
-
-        if x == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+        cvt(unsafe {
+            libc::ioctl(fd, FE_GET_INFO, self as *mut Info)
+        })
     }
 }
 
@@ -161,18 +170,39 @@ bitflags! {
 impl Status {
     /// Reads frontend status
     pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
-        let mut value: u32 = 0;
-        let x = unsafe {
-            libc::ioctl(fd, FE_READ_STATUS, &mut value as *mut u32 as *mut libc::c_void)
-        };
+        self.bits = 0;
+        cvt(unsafe {
+            libc::ioctl(fd, FE_READ_STATUS, &mut self.bits as *mut u32)
+        })
+    }
 
-        if x == -1 {
-            self.bits = 0;
-            Err(io::Error::last_os_error())
-        } else {
-            self.bits = value;
-            Ok(())
+    fn rv(&self, fd: RawFd, request: libc::c_ulong) -> io::Result<usize> {
+        if ! self.contains(Status::FE_HAS_LOCK) {
+            return Ok(0);
         }
+
+        let mut value: u32 = 0;
+        cvt(unsafe {
+            libc::ioctl(fd, request, &mut value as *mut u32)
+        })?;
+
+        Ok(value as usize)
+    }
+
+    pub fn signal(&self, fd: RawFd) -> io::Result<usize> {
+        self.rv(fd, FE_READ_SIGNAL_STRENGTH)
+    }
+
+    pub fn snr(&self, fd: RawFd) -> io::Result<usize> {
+        self.rv(fd, FE_READ_SNR)
+    }
+
+    pub fn ber(&self, fd: RawFd) -> io::Result<usize> {
+        self.rv(fd, FE_READ_BER)
+    }
+
+    pub fn unc(&self, fd: RawFd) -> io::Result<usize> {
+        self.rv(fd, FE_READ_UNCORRECTED_BLOCKS)
     }
 }
 
@@ -191,14 +221,9 @@ impl Default for Event {
 impl Event {
     /// Reads frontend event
     pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
-        let x = unsafe {
-            libc::ioctl(fd, FE_GET_INFO, self as *mut Event as *mut libc::c_void)
-        };
-        if x == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+        cvt(unsafe {
+            libc::ioctl(fd, FE_GET_INFO, self as *mut Event)
+        })
     }
 }
 
@@ -240,13 +265,8 @@ impl Default for Properties {
 impl Properties {
     /// Writes properties set into frontend
     pub fn write(&self, fd: RawFd) -> io::Result<()> {
-        let x = unsafe {
-            libc::ioctl(fd, FE_SET_PROPERTY, self as *const Properties as *const libc::c_void)
-        };
-        if x == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
+        cvt(unsafe {
+            libc::ioctl(fd, FE_SET_PROPERTY, self as *const Properties)
+        })
     }
 }
