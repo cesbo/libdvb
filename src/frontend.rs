@@ -5,7 +5,8 @@ use libc;
 use std::{io, mem};
 use std::os::unix::io::RawFd;
 
-pub const FE_GET_INFO: libc::c_ulong = 2158522173; /* _IOR('o', 61, sizeof(dvb_frontend_info)) */
+pub const FE_GET_INFO: libc::c_ulong = 2158522173; /* _IOR('o', 61, struct dvb_frontend_info) */
+pub const FE_READ_STATUS: libc::c_ulong = 2147774277; /* _IOR('o', 69, fe_status_t) */
 pub const FE_GET_EVENT: libc::c_ulong = 2150133582; /* _IOR('o', 78, struct dvb_frontend_event) */
 pub const FE_SET_PROPERTY: libc::c_ulong = 1074818898; /* _IOW('o', 82, struct dtv_properties) */
 
@@ -157,6 +158,24 @@ bitflags! {
     }
 }
 
+impl Status {
+    /// Reads frontend status
+    pub fn read(&mut self, fd: RawFd) -> io::Result<()> {
+        let mut value: u32 = 0;
+        let x = unsafe {
+            libc::ioctl(fd, FE_READ_STATUS, &mut value as *mut u32 as *mut libc::c_void)
+        };
+
+        if x == -1 {
+            self.bits = 0;
+            Err(io::Error::last_os_error())
+        } else {
+            self.bits = value;
+            Ok(())
+        }
+    }
+}
+
 #[repr(C, packed)]
 pub struct Event {
     pub status: Status,
@@ -183,7 +202,7 @@ impl Event {
     }
 }
 
-const DTV_CLEAR: u32 = 2;
+pub const DTV_CLEAR: u32 = 2;
 
 #[repr(C, packed)]
 pub union PropertyData {

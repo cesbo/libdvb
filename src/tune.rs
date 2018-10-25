@@ -1,5 +1,6 @@
 /// Library level frontend API
 
+use libc;
 use frontend;
 
 use std::io;
@@ -155,13 +156,13 @@ pub struct DvbTune {
 impl DvbTune {
     /// Clears frontend and event queue
     fn clear(&self) -> io::Result<()> {
-        let mut cmdseq = Properties::default();
+        let mut cmdseq = frontend::Properties::default();
         cmdseq.num = 1;
-        cmdseq.props[0].cmd = DTV_CLEAR;
-        cmdseq.write(fd)?;
+        cmdseq.props[0].cmd = frontend::DTV_CLEAR;
+        cmdseq.write(self.fd)?;
 
-        let mut e = Event::default();
-        while let Ok(_) = e.read(fd) {};
+        let mut e = frontend::Event::default();
+        while let Ok(_) = e.read(self.fd) {};
 
         Ok(())
     }
@@ -178,14 +179,15 @@ impl DvbTune {
     /// Opens fronted
     fn open(&mut self, adapter: &Adapter) -> io::Result<()> {
         let path = format!("/dev/dvb/adapter{}/frontend{}", adapter.id, adapter.device);
-        let fd = unsafe {
+        self.fd = unsafe {
             libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
         };
 
-        if fd == -1 {
+        if self.fd == -1 {
+            self.fd = 0;
             Err(io::Error::last_os_error())
         } else {
-            Ok(fd)
+            Ok(())
         }
     }
 
