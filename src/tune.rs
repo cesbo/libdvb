@@ -150,7 +150,7 @@ pub enum DvbOptions {
 #[derive(Default)]
 pub struct DvbTune {
     fd: RawFd,
-    feinfo: frontend::Info,
+    info: frontend::Info,
 }
 
 impl DvbTune {
@@ -159,10 +159,10 @@ impl DvbTune {
         let mut cmdseq = frontend::Properties::default();
         cmdseq.num = 1;
         cmdseq.props[0].cmd = frontend::DTV_CLEAR;
-        cmdseq.write(self.fd)?;
+        frontend::set_property(self.fd, &mut cmdseq)?;
 
         let mut e = frontend::Event::default();
-        while let Ok(_) = e.read(self.fd) {};
+        while let Ok(_) = frontend::get_event(self.fd, &mut e) {};
 
         Ok(())
     }
@@ -187,7 +187,7 @@ impl DvbTune {
             self.fd = 0;
             Err(io::Error::last_os_error())
         } else {
-            Ok(())
+            frontend::get_info(self.fd, &mut self.info)
         }
     }
 
@@ -197,7 +197,6 @@ impl DvbTune {
         match options {
             DvbOptions::DVB_S2(v) => {
                 x.open(&v.adapter)?;
-                x.feinfo.read(x.fd)?;
 
                 // TODO: continue here...
                 // DvbS::tune(v)?;
