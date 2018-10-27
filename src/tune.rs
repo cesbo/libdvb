@@ -12,53 +12,8 @@ pub struct Adapter {
     pub id: usize,
     /// Device number /dev/dvb/adapterX/frontendX
     pub device: usize,
-}
-
-/// Modulation
-#[allow(non_camel_case_types)]
-pub enum Modulation {
-    /// Depend of delivery system.
-    AUTO,
-    NONE,
-    PSK_8,
-    QPSK,
-    QAM_16,
-    QAM_32,
-    QAM_64,
-    QAM_128,
-    QAM_256,
-    VSB_8,
-    VSB_16,
-    APSK_16,
-    APSK_32,
-    DQPSK,
-}
-
-/// FEC - Forward Error Correction
-#[allow(non_camel_case_types)]
-pub enum Fec {
-    AUTO,
-    NONE,
-    FEC_1_2,
-    FEC_2_3,
-    FEC_3_4,
-    FEC_4_5,
-    FEC_5_6,
-    FEC_6_7,
-    FEC_7_8,
-    FEC_8_9,
-    FEC_3_5,
-    FEC_9_10,
-}
-
-/// DVB-S/S2 Transponder polarization
-pub enum Polarization {
-    /// Vertical linear. Right circular. 13 volt
-    VR,
-    /// Horizontal linear. Left circular. 18 volt
-    HL,
-    /// Disable LNB power
-    OFF,
+    /// Modulation
+    pub modulation: u32,
 }
 
 /// DVB-S/S2 Unicable options
@@ -90,21 +45,12 @@ pub enum LnbMode {
     OFF,
 }
 
-/// DVB-S2 Roll-off
-#[allow(non_camel_case_types)]
-pub enum Rof {
-    AUTO,
-    ROF_20,
-    ROF_25,
-    ROF_35,
-}
-
 /// DVB-S/S2 Transponder
 pub struct Transponder {
     /// Frequency
     pub frequency: usize,
-    /// Polarization
-    pub polarization: Polarization,
+    /// Polarization: SEC_VOLTAGE_13 for V/R, SEC_VOLTAGE_18 for H/L
+    pub polarization: u32,
     /// Symbol-rate
     pub symbolrate: usize,
 }
@@ -126,8 +72,7 @@ pub struct DvbS {
     pub adapter: Adapter,
     pub transponder: Transponder,
     pub lnb: Lnb,
-    pub modulation: Modulation,
-    pub fec: Fec,
+    pub fec: u32,
 }
 
 /// DVB-S2 Options
@@ -135,9 +80,8 @@ pub struct DvbS2 {
     pub adapter: Adapter,
     pub transponder: Transponder,
     pub lnb: Lnb,
-    pub modulation: Modulation,
-    pub fec: Fec,
-    pub rof: Rof,
+    pub fec: u32,
+    pub rof: u32,
 }
 
 /// DVB Delivery system
