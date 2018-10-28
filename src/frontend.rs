@@ -26,6 +26,11 @@ pub const DTV_FE_CAPABILITY_COUNT: u32 = 15;
 pub const DTV_FE_CAPABILITY: u32 = 16;
 pub const DTV_DELIVERY_SYSTEM: u32 = 17;
 
+pub const DTV_API_VERSION: u32 = 35;
+pub const DTV_STREAM_ID: u32 = 42;
+
+pub const DTV_SCRAMBLING_SEQUENCE_INDEX: u32 = 70;
+
 bitflags! {
     /// Frontend capabilities
     pub struct Caps: u32 {
@@ -122,6 +127,7 @@ pub struct Info {
 }
 
 impl Default for Info {
+    #[inline]
     fn default() -> Info {
         unsafe { mem::zeroed::<Info>() }
     }
@@ -280,18 +286,19 @@ pub struct Property {
     pub result: i32,
 }
 
-/// Set of command/value pairs
-#[repr(C, packed)]
-pub struct Properties {
-    /// Amount of commands stored at the struct
-    pub num: u32,
-    /// Commands
-    pub props: [Property; 20],
+impl Default for Property {
+    #[inline]
+    fn default() -> Property {
+        unsafe { mem::zeroed::<Property>() }
+    }
 }
 
-impl Default for Properties {
-    fn default() -> Properties {
-        unsafe { mem::zeroed::<Properties>() }
+impl Property {
+    pub fn new(cmd: u32, data: u32) -> Property {
+        let mut prop = Property::default();
+        prop.cmd = cmd;
+        prop.u.data = data;
+        prop
     }
 }
 
@@ -311,6 +318,7 @@ pub struct Event {
 }
 
 impl Default for Event {
+    #[inline]
     fn default() -> Event {
         unsafe { mem::zeroed::<Event>() }
     }
@@ -341,10 +349,14 @@ pub fn get_info(fd: RawFd, info: &mut Info) -> io::Result<()> {
     })
 }
 
-pub fn set_property(fd: RawFd, properties: &Properties) -> io::Result<()> {
+pub fn set_property(fd: RawFd, props: &Vec<Property>) -> io::Result<()> {
     const FE_SET_PROPERTY: libc::c_ulong = 1074818898;
+
+    #[repr(C, packed)] struct Properties(u32, *const Property);
+    let properties = Properties(props.len() as u32, props.as_ptr());
+
     cvt(unsafe {
-        libc::ioctl(fd, FE_SET_PROPERTY, properties as *const Properties)
+        libc::ioctl(fd, FE_SET_PROPERTY, &properties as *const Properties)
     })
 }
 

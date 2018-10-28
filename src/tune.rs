@@ -6,6 +6,10 @@ use frontend;
 use std::io;
 use std::os::unix::io::RawFd;
 
+pub trait Dvb {
+    fn open(&self) -> io::Result<RawFd>;
+}
+
 /// Adapter
 pub struct Adapter {
     /// Adapter number /dev/dvb/adapterX
@@ -14,6 +18,44 @@ pub struct Adapter {
     pub device: usize,
     /// Modulation
     pub modulation: u32,
+}
+
+fn open(adapter: &Adapter) -> io::Result<RawFd> {
+    let path = format!("/dev/dvb/adapter{}/frontend{}", adapter.id, adapter.device);
+    let fd = unsafe {
+        libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
+    };
+
+    if fd == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(fd)
+    }
+}
+
+fn clear(fd: RawFd) -> io::Result<()> {
+    let cmdseq = vec![
+        frontend::Property::new(frontend::DTV_CLEAR, 0),
+    ];
+    frontend::set_property(fd, &cmdseq)?;
+
+    let mut event = frontend::Event::default();
+    loop {
+        if let Err(e) = frontend::get_event(fd, &mut event) {
+            if let Some(r) = e.raw_os_error() {
+                if r == libc::EWOULDBLOCK {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn close(fd: RawFd) {
+    clear(fd).unwrap();
+    unsafe { libc::close(fd) };
 }
 
 /// DVB-S/S2 Unicable options
@@ -67,14 +109,6 @@ pub struct Lnb {
     pub slof: usize,
 }
 
-/// DVB-S Options
-pub struct DvbS {
-    pub adapter: Adapter,
-    pub transponder: Transponder,
-    pub lnb: Lnb,
-    pub fec: u32,
-}
-
 /// DVB-S2 Options
 pub struct DvbS2 {
     pub adapter: Adapter,
@@ -84,70 +118,47 @@ pub struct DvbS2 {
     pub rof: u32,
 }
 
-/// DVB Delivery system
-#[allow(non_camel_case_types)]
-pub enum DvbOptions {
-    DVB_S2(DvbS2),
+impl Dvb for DvbS2 {
+    fn open(&self) -> io::Result<RawFd> {
+        let fd = open(&self.adapter)?;
+
+        let cmdseq = vec![
+            frontend::Property::new(frontend::DTV_DELIVERY_SYSTEM, frontend::SYS_DVBS2),
+            frontend::Property::new(frontend::DTV_FREQUENCY, 0), // TODO
+            frontend::Property::new(frontend::DTV_MODULATION, self.adapter.modulation),
+            frontend::Property::new(frontend::DTV_INVERSION, frontend::INVERSION_AUTO),
+            frontend::Property::new(frontend::DTV_SYMBOL_RATE, 0), // TODO
+            frontend::Property::new(frontend::DTV_INNER_FEC, self.fec),
+            frontend::Property::new(frontend::DTV_PILOT, frontend::PILOT_AUTO),
+            frontend::Property::new(frontend::DTV_ROLLOFF, frontend::ROLLOFF_35),
+            frontend::Property::new(frontend::DTV_STREAM_ID, 0),
+            frontend::Property::new(frontend::DTV_SCRAMBLING_SEQUENCE_INDEX, 0),
+            frontend::Property::new(frontend::DTV_TUNE, 0),
+        ];
+        frontend::set_property(fd, &cmdseq)?;
+
+        Ok(fd)
+    }
 }
 
 /// DVB Instance
 #[derive(Default)]
 pub struct DvbTune {
     fd: RawFd,
-    info: frontend::Info,
 }
 
 impl DvbTune {
-    /// Clears frontend and event queue
-    fn clear(&self) -> io::Result<()> {
-        let mut cmdseq = frontend::Properties::default();
-        cmdseq.num = 1;
-        cmdseq.props[0].cmd = frontend::DTV_CLEAR;
-        frontend::set_property(self.fd, &mut cmdseq)?;
-
-        let mut e = frontend::Event::default();
-        while let Ok(_) = frontend::get_event(self.fd, &mut e) {};
-
-        Ok(())
+    pub fn new(dvb: &Dvb) -> io::Result<DvbTune> {
+        let mut x = DvbTune::default();
+        x.fd = dvb.open()?;
+        Ok(x)
     }
 
-    /// Closes frontend
     pub fn close(&mut self) {
         if self.fd > 0 {
-            self.clear().unwrap();
-            unsafe { libc::close(self.fd) };
+            close(self.fd);
             self.fd = 0;
         }
-    }
-
-    /// Opens fronted
-    fn open(&mut self, adapter: &Adapter) -> io::Result<()> {
-        let path = format!("/dev/dvb/adapter{}/frontend{}", adapter.id, adapter.device);
-        self.fd = unsafe {
-            libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
-        };
-
-        if self.fd == -1 {
-            self.fd = 0;
-            Err(io::Error::last_os_error())
-        } else {
-            frontend::get_info(self.fd, &mut self.info)
-        }
-    }
-
-    pub fn new(options: &DvbOptions) -> io::Result<DvbTune> {
-        let mut x = DvbTune::default();
-
-        match options {
-            DvbOptions::DVB_S2(v) => {
-                x.open(&v.adapter)?;
-
-                // TODO: continue here...
-                // DvbS::tune(v)?;
-            },
-        };
-
-        Ok(x)
     }
 }
 
