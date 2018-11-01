@@ -102,11 +102,12 @@ bitflags! {
 /// Frontend properties and capabilities
 /// The frequencies are specified in Hz for Terrestrial and Cable systems.
 /// The frequencies are specified in kHz for Satellite systems.
-#[repr(C, packed)]
+#[repr(C)]
 pub struct Info {
     /// Name of the frontend
     pub name: [libc::c_char; 128],
-    fe_type: i32, /* DEPRECATED. Use DTV_ENUM_DELSYS instead */
+    /// DEPRECATED. Use DTV_ENUM_DELSYS instead
+    fe_type: i32,
     /// Minimal frequency supported by the frontend
     pub frequency_min: u32,
     /// Maximal frequency supported by the frontend
@@ -121,7 +122,8 @@ pub struct Info {
     pub symbol_rate_max: u32,
     /// Maximal symbol rate tolerance, in ppm (for Cable/Satellite systems)
     pub symbol_rate_tolerance: u32,
-    notifier_delay: u32, /* DEPRECATED */
+    /// DEPRECATED
+    notifier_delay: u32,
     /// Capabilities supported by the frontend
     pub caps: Caps,
 }
@@ -166,6 +168,12 @@ bitflags! {
         /// Frontend was reinitialized, application is recommended
         /// to reset DiSEqC, tone and parameters
         const FE_REINIT = 0x40;
+    }
+}
+
+impl Default for Status {
+    fn default() -> Status {
+        Status::FE_NONE
     }
 }
 
@@ -268,18 +276,18 @@ pub const SYS_TURBO: u32 = 0x17;
 pub const SYS_DVBC_ANNEX_C: u32 = 0x18;
 pub const SYS_DVBC2: u32 = 0x19;
 
-#[repr(C, packed)]
+#[repr(C)]
 pub union PropertyData {
     pub data: u32,
-    reserved: [u8; 56],
+    _reserved: [u8; 56],
 }
 
 /// Store one of frontend command and its value
-#[repr(C, packed)]
+#[repr(C)]
 pub struct Property {
     /// Digital TV command
     pub cmd: u32,
-    reserved: [u32; 3],
+    _reserved: [u32; 3],
     /// Union with the values for the command
     pub u: PropertyData,
     /// Result of the command set (currently unused)
@@ -302,16 +310,16 @@ impl Property {
     }
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 pub struct Parameters {
     /// (absolute) frequency in Hz for DVB-C/DVB-T/ATSC
     /// intermediate frequency in kHz for DVB-S
     pub frequency: u32,
     /// Unimplemented
-    reserved: [u8; 32],
+    _reserved: [u8; 32],
 }
 
-#[repr(C, packed)]
+#[repr(C)]
 pub struct Event {
     pub status: Status,
     pub parameters: Parameters,
@@ -349,10 +357,10 @@ pub fn get_info(fd: RawFd, info: &mut Info) -> io::Result<()> {
     })
 }
 
-pub fn set_property(fd: RawFd, props: &Vec<Property>) -> io::Result<()> {
+pub fn set_property(fd: RawFd, props: &[Property]) -> io::Result<()> {
     const FE_SET_PROPERTY: libc::c_ulong = 1074818898;
 
-    #[repr(C, packed)] struct Properties(u32, *const Property);
+    #[repr(C)] struct Properties(u32, *const Property);
     let properties = Properties(props.len() as u32, props.as_ptr());
 
     cvt(unsafe {
@@ -403,13 +411,13 @@ pub fn read_unc(fd: RawFd, value: &mut u32) -> io::Result<()> {
 pub fn set_tone(fd: RawFd, tone: u32) -> io::Result<()> {
     const FE_SET_TONE: libc::c_ulong = 28482;
     cvt(unsafe {
-        libc::ioctl(fd, FE_SET_TONE, &tone as *const u32)
+        libc::ioctl(fd, FE_SET_TONE, tone)
     })
 }
 
 pub fn set_voltage(fd: RawFd, voltage: u32) -> io::Result<()> {
     const FE_SET_VOLTAGE: libc::c_ulong = 28483;
     cvt(unsafe {
-        libc::ioctl(fd, FE_SET_VOLTAGE, &voltage as *const u32)
+        libc::ioctl(fd, FE_SET_VOLTAGE, voltage)
     })
 }

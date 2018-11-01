@@ -124,7 +124,8 @@ impl Dvb for DvbS2 {
         let fd = open(&self.adapter)?;
         clear(fd)?;
 
-        let mut frequency: u32 = self.transponder.frequency;
+        let symbolrate = self.transponder.symbolrate * 1000;
+        let mut frequency = self.transponder.frequency;
         let mut tone = frontend::SEC_TONE_OFF;
 
         if self.lnb.lof1 > 0 {
@@ -164,6 +165,16 @@ impl Dvb for DvbS2 {
         }
         frequency *= 1000;
 
+        let mut info = frontend::Info::default();
+        frontend::get_info(fd, &mut info)?;
+
+        if ! info.caps.contains(frontend::Caps::FE_CAN_2G_MODULATION) ||
+            frequency < info.frequency_min || frequency > info.frequency_max ||
+            symbolrate < info.symbol_rate_min || symbolrate > info.symbol_rate_max
+        {
+            return Err(io::Error::from_raw_os_error(libc::EINVAL));
+        }
+
         match self.lnb.mode {
             LnbMode::AUTO => {
                 frontend::set_tone(fd, frontend::SEC_TONE_OFF)?;
@@ -191,7 +202,7 @@ impl Dvb for DvbS2 {
             frontend::Property::new(frontend::DTV_FREQUENCY, frequency),
             frontend::Property::new(frontend::DTV_MODULATION, self.adapter.modulation),
             frontend::Property::new(frontend::DTV_INVERSION, frontend::INVERSION_AUTO),
-            frontend::Property::new(frontend::DTV_SYMBOL_RATE, self.transponder.symbolrate * 1000),
+            frontend::Property::new(frontend::DTV_SYMBOL_RATE, symbolrate),
             frontend::Property::new(frontend::DTV_INNER_FEC, self.fec),
             frontend::Property::new(frontend::DTV_PILOT, frontend::PILOT_AUTO),
             frontend::Property::new(frontend::DTV_ROLLOFF, self.rof),
@@ -209,6 +220,12 @@ impl Dvb for DvbS2 {
 #[derive(Default)]
 pub struct DvbTune {
     fd: RawFd,
+
+    pub status: frontend::Status,
+    pub signal: u32,
+    pub snr: u32,
+    pub ber: u32,
+    pub unc: u32,
 }
 
 impl DvbTune {
@@ -223,6 +240,22 @@ impl DvbTune {
             close(self.fd);
             self.fd = 0;
         }
+    }
+
+    pub fn status(&mut self) -> io::Result<()> {
+        frontend::read_status(self.fd, &mut self.status)?;
+        if self.status.contains(frontend::Status::FE_HAS_LOCK) {
+            frontend::read_signal(self.fd, &mut self.signal)?;
+            frontend::read_snr(self.fd, &mut self.snr)?;
+            frontend::read_ber(self.fd, &mut self.ber)?;
+            frontend::read_unc(self.fd, &mut self.unc)?;
+        } else {
+            self.signal = 0;
+            self.snr = 0;
+            self.ber = 0;
+            self.unc = 0;
+        }
+        Ok(())
     }
 }
 
