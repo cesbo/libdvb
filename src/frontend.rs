@@ -3,6 +3,7 @@
 
 use libc;
 
+use base::cvt;
 use std::{io, mem};
 use std::os::unix::io::RawFd;
 
@@ -333,15 +334,6 @@ impl Default for Event {
 }
 
 // ioctl
-
-#[inline]
-fn cvt(result: i32) -> io::Result<()> {
-    if result == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
 
 pub fn get_event(fd: RawFd, event: &mut Event) -> io::Result<()> {
     const FE_GET_EVENT: libc::c_ulong = 2150133582;
