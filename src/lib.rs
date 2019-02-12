@@ -1,7 +1,4 @@
-extern crate libc;
-#[macro_use] extern crate bitflags;
-
-mod base;
+#[macro_use] mod base;
 
 pub mod frontend;
 pub mod demux;

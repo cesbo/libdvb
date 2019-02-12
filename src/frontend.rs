@@ -2,10 +2,12 @@
 /// System level frontend API
 
 use libc;
+use bitflags::bitflags;
 
-use base::cvt;
+
 use std::{io, mem};
 use std::os::unix::io::RawFd;
+
 
 pub const DTV_UNDEFINED: u32 = 0;
 pub const DTV_TUNE: u32 = 1;
@@ -23,14 +25,18 @@ pub const DTV_PILOT: u32 = 12;
 pub const DTV_ROLLOFF: u32 = 13;
 pub const DTV_DISEQC_SLAVE_REPLY: u32 = 14;
 
+
 pub const DTV_FE_CAPABILITY_COUNT: u32 = 15;
 pub const DTV_FE_CAPABILITY: u32 = 16;
 pub const DTV_DELIVERY_SYSTEM: u32 = 17;
 
+
 pub const DTV_API_VERSION: u32 = 35;
 pub const DTV_STREAM_ID: u32 = 42;
 
+
 pub const DTV_SCRAMBLING_SEQUENCE_INDEX: u32 = 70;
+
 
 bitflags! {
     /// Frontend capabilities
@@ -100,6 +106,7 @@ bitflags! {
     }
 }
 
+
 /// Frontend properties and capabilities
 /// The frequencies are specified in Hz for Terrestrial and Cable systems.
 /// The frequencies are specified in kHz for Satellite systems.
@@ -129,12 +136,14 @@ pub struct Info {
     pub caps: Caps,
 }
 
+
 impl Default for Info {
     #[inline]
     fn default() -> Info {
         unsafe { mem::zeroed::<Info>() }
     }
 }
+
 
 /// Output 13V to the LNB. Vertical linear. Right circular.
 pub const SEC_VOLTAGE_13: u32 = 0x00;
@@ -143,11 +152,14 @@ pub const SEC_VOLTAGE_18: u32 = 0x01;
 /// Don't feed the LNB with a DC voltage
 pub const SEC_VOLTAGE_OFF: u32 = 0x02;
 
+
 pub const SEC_TONE_ON: u32 = 0x00;
 pub const SEC_TONE_OFF: u32 = 0x01;
 
+
 pub const SEC_MINI_A: u32 = 0x00;
 pub const SEC_MINI_B: u32 = 0x01;
+
 
 bitflags! {
     /// Enumerates the possible frontend status
@@ -172,15 +184,18 @@ bitflags! {
     }
 }
 
+
 impl Default for Status {
     fn default() -> Status {
         Status::FE_NONE
     }
 }
 
+
 pub const INVERSION_OFF: u32 = 0x00;
 pub const INVERSION_ON: u32 = 0x01;
 pub const INVERSION_AUTO: u32 = 0x02;
+
 
 pub const FEC_NONE: u32 = 0x00;
 pub const FEC_1_2: u32 = 0x01;
@@ -197,6 +212,7 @@ pub const FEC_9_10: u32 = 0x11;
 pub const FEC_2_5: u32 = 0x12;
 pub const FEC_1_4: u32 = 0x13;
 pub const FEC_1_3: u32 = 0x14;
+
 
 pub const MODULATION_QPSK: u32 = 0x00;
 pub const MODULATION_QAM_16: u32 = 0x01;
@@ -216,6 +232,7 @@ pub const MODULATION_APSK_64: u32 = 0x14;
 pub const MODULATION_APSK_128: u32 = 0x15;
 pub const MODULATION_APSK_256: u32 = 0x16;
 
+
 pub const TRANSMISSION_MODE_2K: u32 = 0x00;
 pub const TRANSMISSION_MODE_8K: u32 = 0x01;
 pub const TRANSMISSION_MODE_AUTO: u32 = 0x02;
@@ -225,6 +242,7 @@ pub const TRANSMISSION_MODE_16K: u32 = 0x05;
 pub const TRANSMISSION_MODE_32K: u32 = 0x06;
 pub const TRANSMISSION_MODE_C1: u32 = 0x07;
 pub const TRANSMISSION_MODE_C3780: u32 = 0x08;
+
 
 pub const GUARD_INTERVAL_1_32: u32 = 0x00;
 pub const GUARD_INTERVAL_1_16: u32 = 0x01;
@@ -238,15 +256,18 @@ pub const GUARD_INTERVAL_PN420: u32 = 0x08;
 pub const GUARD_INTERVAL_PN595: u32 = 0x09;
 pub const GUARD_INTERVAL_PN945: u32 = 0x10;
 
+
 pub const HIERARCHY_NONE: u32 = 0x00;
 pub const HIERARCHY_1: u32 = 0x01;
 pub const HIERARCHY_2: u32 = 0x02;
 pub const HIERARCHY_4: u32 = 0x03;
 pub const HIERARCHY_AUTO: u32 = 0x04;
 
+
 pub const PILOT_ON: u32 = 0x00;
 pub const PILOT_OFF: u32 = 0x01;
 pub const PILOT_AUTO: u32 = 0x02;
+
 
 pub const ROLLOFF_35: u32 = 0x00;
 pub const ROLLOFF_20: u32 = 0x01;
@@ -255,6 +276,7 @@ pub const ROLLOFF_AUTO: u32 = 0x03;
 pub const ROLLOFF_15: u32 = 0x04;
 pub const ROLLOFF_10: u32 = 0x05;
 pub const ROLLOFF_5: u32 = 0x06;
+
 
 pub const SYS_UNDEFINED: u32 = 0x00;
 pub const SYS_DVBC_ANNEX_A: u32 = 0x01;
@@ -277,11 +299,13 @@ pub const SYS_TURBO: u32 = 0x17;
 pub const SYS_DVBC_ANNEX_C: u32 = 0x18;
 pub const SYS_DVBC2: u32 = 0x19;
 
+
 #[repr(C)]
 pub union PropertyData {
     pub data: u32,
     _reserved: [u8; 56],
 }
+
 
 /// Store one of frontend command and its value
 #[repr(C)]
@@ -295,12 +319,14 @@ pub struct Property {
     pub result: i32,
 }
 
+
 impl Default for Property {
     #[inline]
     fn default() -> Property {
         unsafe { mem::zeroed::<Property>() }
     }
 }
+
 
 impl Property {
     pub fn new(cmd: u32, data: u32) -> Property {
@@ -311,6 +337,7 @@ impl Property {
     }
 }
 
+
 #[repr(C)]
 pub struct Parameters {
     /// (absolute) frequency in Hz for DVB-C/DVB-T/ATSC
@@ -320,11 +347,13 @@ pub struct Parameters {
     _reserved: [u8; 32],
 }
 
+
 #[repr(C)]
 pub struct Event {
     pub status: Status,
     pub parameters: Parameters,
 }
+
 
 impl Default for Event {
     #[inline]
@@ -333,20 +362,15 @@ impl Default for Event {
     }
 }
 
-// ioctl
 
 pub fn get_event(fd: RawFd, event: &mut Event) -> io::Result<()> {
     const FE_GET_EVENT: libc::c_ulong = 2150133582;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_GET_EVENT, event as *mut Event)
-    })
+    cvt!(libc::ioctl(fd, FE_GET_EVENT, event as *mut Event))
 }
 
 pub fn get_info(fd: RawFd, info: &mut Info) -> io::Result<()> {
     const FE_GET_INFO: libc::c_ulong = 2158522173;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_GET_INFO, info as *mut Info)
-    })
+    cvt!(libc::ioctl(fd, FE_GET_INFO, info as *mut Info))
 }
 
 pub fn set_property(fd: RawFd, props: &[Property]) -> io::Result<()> {
@@ -355,61 +379,45 @@ pub fn set_property(fd: RawFd, props: &[Property]) -> io::Result<()> {
     #[repr(C)] struct Properties(u32, *const Property);
     let properties = Properties(props.len() as u32, props.as_ptr());
 
-    cvt(unsafe {
-        libc::ioctl(fd, FE_SET_PROPERTY, &properties as *const Properties)
-    })
+    cvt!(libc::ioctl(fd, FE_SET_PROPERTY, &properties as *const Properties))
 }
 
 pub fn read_status(fd: RawFd, status: &mut Status) -> io::Result<()> {
     const FE_READ_STATUS: libc::c_ulong = 2147774277;
     status.bits = 0;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_READ_STATUS, &mut status.bits as *mut u32)
-    })
+    cvt!(libc::ioctl(fd, FE_READ_STATUS, &mut status.bits as *mut u32))
 }
 
 pub fn read_signal(fd: RawFd, value: &mut u32) -> io::Result<()> {
     const FE_READ_SIGNAL_STRENGTH: libc::c_ulong = 2147643207;
     *value = 0;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_READ_SIGNAL_STRENGTH, value as *mut u32)
-    })
+    cvt!(libc::ioctl(fd, FE_READ_SIGNAL_STRENGTH, value as *mut u32))
 }
 
 pub fn read_snr(fd: RawFd, value: &mut u32) -> io::Result<()> {
     const FE_READ_SNR: libc::c_ulong = 2147643208;
     *value = 0;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_READ_SNR, value as *mut u32)
-    })
+    cvt!(libc::ioctl(fd, FE_READ_SNR, value as *mut u32))
 }
 
 pub fn read_ber(fd: RawFd, value: &mut u32) -> io::Result<()> {
     const FE_READ_BER: libc::c_ulong = 2147774278;
     *value = 0;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_READ_BER, value as *mut u32)
-    })
+    cvt!(libc::ioctl(fd, FE_READ_BER, value as *mut u32))
 }
 
 pub fn read_unc(fd: RawFd, value: &mut u32) -> io::Result<()> {
     const FE_READ_UNCORRECTED_BLOCKS: libc::c_ulong = 2147774281;
     *value = 0;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_READ_UNCORRECTED_BLOCKS, value as *mut u32)
-    })
+    cvt!(libc::ioctl(fd, FE_READ_UNCORRECTED_BLOCKS, value as *mut u32))
 }
 
 pub fn set_tone(fd: RawFd, tone: u32) -> io::Result<()> {
     const FE_SET_TONE: libc::c_ulong = 28482;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_SET_TONE, tone)
-    })
+    cvt!(libc::ioctl(fd, FE_SET_TONE, tone))
 }
 
 pub fn set_voltage(fd: RawFd, voltage: u32) -> io::Result<()> {
     const FE_SET_VOLTAGE: libc::c_ulong = 28483;
-    cvt(unsafe {
-        libc::ioctl(fd, FE_SET_VOLTAGE, voltage)
-    })
+    cvt!(libc::ioctl(fd, FE_SET_VOLTAGE, voltage))
 }

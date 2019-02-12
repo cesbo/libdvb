@@ -1,14 +1,77 @@
 /// Library level frontend API
 
 use libc;
-use frontend;
+
 
 use std::{io, time, thread};
 use std::os::unix::io::RawFd;
 
+
+use crate::frontend;
+
+
 pub trait Dvb {
-    fn open(&self) -> io::Result<RawFd>;
+    fn open(&self) -> io::Result<DvbFd>;
 }
+
+
+#[derive(Default)]
+pub struct DvbFd {
+    inner: RawFd,
+}
+
+
+impl Drop for DvbFd {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+
+impl DvbFd {
+    pub fn open(id: u32, device: u32) -> io::Result<Self> {
+        let path = format!("/dev/dvb/adapter{}/frontend{}", id, device);
+        let fd = unsafe {
+            libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
+        };
+
+        if fd == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(DvbFd{ inner: fd })
+        }
+    }
+
+
+    pub fn clear(&self) -> io::Result<()> {
+        let cmdseq = vec![
+            frontend::Property::new(frontend::DTV_CLEAR, 0),
+        ];
+        frontend::set_property(self.inner, &cmdseq)?;
+
+        let mut event = frontend::Event::default();
+        loop {
+            if let Err(e) = frontend::get_event(self.inner, &mut event) {
+                if let Some(r) = e.raw_os_error() {
+                    if r == libc::EWOULDBLOCK {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn close(&mut self) {
+        if self.inner > 0 {
+            self.clear().unwrap();
+            unsafe { libc::close(self.inner) };
+            self.inner = 0;
+        }
+    }
+}
+
 
 /// Adapter
 pub struct Adapter {
@@ -20,46 +83,9 @@ pub struct Adapter {
     pub modulation: u32,
 }
 
-fn open(adapter: &Adapter) -> io::Result<RawFd> {
-    let path = format!("/dev/dvb/adapter{}/frontend{}", adapter.id, adapter.device);
-    let fd = unsafe {
-        libc::open(path.as_ptr() as *const i8, libc::O_NONBLOCK | libc::O_RDWR)
-    };
-
-    if fd == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(fd)
-    }
-}
-
-fn clear(fd: RawFd) -> io::Result<()> {
-    let cmdseq = vec![
-        frontend::Property::new(frontend::DTV_CLEAR, 0),
-    ];
-    frontend::set_property(fd, &cmdseq)?;
-
-    let mut event = frontend::Event::default();
-    loop {
-        if let Err(e) = frontend::get_event(fd, &mut event) {
-            if let Some(r) = e.raw_os_error() {
-                if r == libc::EWOULDBLOCK {
-                    break;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn close(fd: RawFd) {
-    clear(fd).unwrap();
-    unsafe { libc::close(fd) };
-}
 
 /// DVB-S/S2 Unicable options
-pub struct Unicable10 {
+pub struct Unicable {
     /// Slot range from 1 to 8
     pub slot: u32,
     /// Frequency range from 950 to 2150 MHz
@@ -67,6 +93,7 @@ pub struct Unicable10 {
     /// Position range from 1 to 2
     pub position: u32,
 }
+
 
 /// DVB-S/S2 LNB mode
 #[allow(non_camel_case_types)]
@@ -82,10 +109,13 @@ pub enum LnbMode {
     /// DiSEqC 1.1 port range from 1 to 16
     DISEQC_1_1(u32),
     /// EN50494 / Unicable
-    UNICABLE_1_0(Unicable10),
+    UNICABLE_1_0(Unicable),
+    /// EN50607 / Unicable-II
+    UNICABLE_2_0(Unicable),
     /// Disable LNB
     OFF,
 }
+
 
 /// DVB-S/S2 Transponder
 pub struct Transponder {
@@ -96,6 +126,7 @@ pub struct Transponder {
     /// Symbol-rate
     pub symbolrate: u32,
 }
+
 
 /// DVB-S/S2 LNB
 pub struct Lnb {
@@ -109,6 +140,7 @@ pub struct Lnb {
     pub slof: u32,
 }
 
+
 /// DVB-S2 Options
 pub struct DvbS2 {
     pub adapter: Adapter,
@@ -119,10 +151,11 @@ pub struct DvbS2 {
     pub mis: u32,
 }
 
+
 impl Dvb for DvbS2 {
-    fn open(&self) -> io::Result<RawFd> {
-        let fd = open(&self.adapter)?;
-        clear(fd)?;
+    fn open(&self) -> io::Result<DvbFd> {
+        let fd = DvbFd::open(self.adapter.id, self.adapter.device)?;
+        fd.clear()?;
 
         let symbolrate = self.transponder.symbolrate * 1000;
         let mut frequency = self.transponder.frequency;
@@ -166,7 +199,7 @@ impl Dvb for DvbS2 {
         frequency *= 1000;
 
         let mut info = frontend::Info::default();
-        frontend::get_info(fd, &mut info)?;
+        frontend::get_info(fd.inner, &mut info)?;
 
         if ! info.caps.contains(frontend::Caps::FE_CAN_2G_MODULATION) ||
             frequency < info.frequency_min || frequency > info.frequency_max ||
@@ -177,22 +210,22 @@ impl Dvb for DvbS2 {
 
         match self.lnb.mode {
             LnbMode::AUTO => {
-                frontend::set_tone(fd, frontend::SEC_TONE_OFF)?;
-                frontend::set_voltage(fd, self.transponder.polarization)?;
+                frontend::set_tone(fd.inner, frontend::SEC_TONE_OFF)?;
+                frontend::set_voltage(fd.inner, self.transponder.polarization)?;
                 thread::sleep(time::Duration::from_millis(100));
-                frontend::set_tone(fd, tone)?;
+                frontend::set_tone(fd.inner, tone)?;
                 thread::sleep(time::Duration::from_millis(100));
             },
             LnbMode::TONE => {
-                frontend::set_tone(fd, frontend::SEC_TONE_OFF)?;
-                frontend::set_voltage(fd, self.transponder.polarization)?;
+                frontend::set_tone(fd.inner, frontend::SEC_TONE_OFF)?;
+                frontend::set_voltage(fd.inner, self.transponder.polarization)?;
                 thread::sleep(time::Duration::from_millis(100));
-                frontend::set_tone(fd, frontend::SEC_TONE_ON)?;
+                frontend::set_tone(fd.inner, frontend::SEC_TONE_ON)?;
                 thread::sleep(time::Duration::from_millis(100));
             },
             LnbMode::OFF => {
-                frontend::set_tone(fd, frontend::SEC_TONE_OFF)?;
-                frontend::set_voltage(fd, frontend::SEC_VOLTAGE_OFF)?;
+                frontend::set_tone(fd.inner, frontend::SEC_TONE_OFF)?;
+                frontend::set_voltage(fd.inner, frontend::SEC_VOLTAGE_OFF)?;
             },
             _ => {},
         };
@@ -210,16 +243,17 @@ impl Dvb for DvbS2 {
             frontend::Property::new(frontend::DTV_SCRAMBLING_SEQUENCE_INDEX, 0),
             frontend::Property::new(frontend::DTV_TUNE, 0),
         ];
-        frontend::set_property(fd, &cmdseq)?;
+        frontend::set_property(fd.inner, &cmdseq)?;
 
         Ok(fd)
     }
 }
 
+
 /// DVB Instance
 #[derive(Default)]
 pub struct DvbTune {
-    fd: RawFd,
+    fd: DvbFd,
 
     pub status: frontend::Status,
     pub signal: u32,
@@ -228,27 +262,26 @@ pub struct DvbTune {
     pub unc: u32,
 }
 
+
 impl DvbTune {
-    pub fn new(dvb: &Dvb) -> io::Result<DvbTune> {
+    pub fn new<T: Dvb>(dvb: &T) -> io::Result<DvbTune> {
         let mut x = DvbTune::default();
         x.fd = dvb.open()?;
         Ok(x)
     }
 
+    #[inline]
     pub fn close(&mut self) {
-        if self.fd > 0 {
-            close(self.fd);
-            self.fd = 0;
-        }
+        self.fd.close();
     }
 
     pub fn status(&mut self) -> io::Result<()> {
-        frontend::read_status(self.fd, &mut self.status)?;
+        frontend::read_status(self.fd.inner, &mut self.status)?;
         if self.status.contains(frontend::Status::FE_HAS_LOCK) {
-            frontend::read_signal(self.fd, &mut self.signal)?;
-            frontend::read_snr(self.fd, &mut self.snr)?;
-            frontend::read_ber(self.fd, &mut self.ber)?;
-            frontend::read_unc(self.fd, &mut self.unc)?;
+            frontend::read_signal(self.fd.inner, &mut self.signal)?;
+            frontend::read_snr(self.fd.inner, &mut self.snr)?;
+            frontend::read_ber(self.fd.inner, &mut self.ber)?;
+            frontend::read_unc(self.fd.inner, &mut self.unc)?;
         } else {
             self.signal = 0;
             self.snr = 0;
@@ -258,6 +291,7 @@ impl DvbTune {
         Ok(())
     }
 }
+
 
 impl Drop for DvbTune {
     fn drop(&mut self) {
