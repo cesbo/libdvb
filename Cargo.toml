@@ -1,9 +1,10 @@
 [package]
-name = "dvb"
-version = "0.1.0"
+name = "libdvb"
+version = "0.2.0"
 authors = ["Cesbo Developers Team"]
 edition = "2018"
 
 [dependencies]
 libc = "0.2"
-bitflags = "1.0"
+anyhow = "1.0"
+thiserror = "1.0"
