@@ -692,6 +692,11 @@ impl DtvProperty {
             result: 0,
         }
     }
+
+    #[inline]
+    pub fn get_data(&self) -> u32 {
+        unsafe { self.u.data }
+    }
 }
 
 

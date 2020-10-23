@@ -57,6 +57,16 @@ pub enum FeError {
     InvalidSymbolrate,
     #[error("unknown subsystem")]
     InvalidSubsystem,
+    #[error("no auto inversion")]
+    NoAutoInversion,
+    #[error("no auto transmission mode")]
+    NoAutoTransmitMode,
+    #[error("no auto guard interval")]
+    NoAutoGuardInterval,
+    #[error("no auto hierarchy")]
+    NoAutoHierarchy,
+    #[error("multistream not supported")]
+    NoMultistream,
 }
 
 
@@ -70,7 +80,7 @@ pub struct FeDevice {
     delivery_system_list: Vec<u32>,
     frequency_range: Range<u32>,
     symbolrate_range: Range<u32>,
-    is_multistream: bool,
+    caps: u32,
 
     vendor_id: u16,
     model_id: u16,
@@ -98,7 +108,7 @@ impl fmt::Display for FeDevice {
             self.symbolrate_range.start / 1000,
             self.symbolrate_range.end / 1000)?;
 
-        write!(f, "Multistream: {}", if self.is_multistream { 'Y' } else { 'N' })?;
+        write!(f, "Frontend capabilities: 0x{:08x}", self.caps)?;
 
         Ok(())
     }
@@ -191,7 +201,7 @@ impl FeDevice {
         self.frequency_range = feinfo.frequency_min .. feinfo.frequency_max;
         self.symbolrate_range = feinfo.symbol_rate_min .. feinfo.symbol_rate_max;
 
-        self.is_multistream = (feinfo.caps & FE_CAN_MULTISTREAM) != 0;
+        self.caps = feinfo.caps;
 
         // DVB v5 properties
 
@@ -265,7 +275,7 @@ impl FeDevice {
             delivery_system_list: Vec::default(),
             frequency_range: 0 .. 0,
             symbolrate_range: 0 .. 0,
-            is_multistream: false,
+            caps: 0,
 
             vendor_id: 0,
             model_id: 0,
@@ -280,18 +290,50 @@ impl FeDevice {
         for p in cmdseq {
             match p.cmd {
                 DTV_FREQUENCY => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     ensure!(
                         self.frequency_range.contains(&v),
                         FeError::InvalidFrequency);
                 }
                 DTV_SYMBOL_RATE => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     ensure!(
                         self.symbolrate_range.contains(&v),
                         FeError::InvalidSymbolrate);
                 }
-                // TODO: check caps
+                DTV_INVERSION => {
+                    if p.get_data() == INVERSION_AUTO {
+                        ensure!(
+                            self.caps & FE_CAN_INVERSION_AUTO != 0,
+                            FeError::NoAutoInversion);
+                    }
+                }
+                DTV_TRANSMISSION_MODE => {
+                    if p.get_data() == TRANSMISSION_MODE_AUTO {
+                        ensure!(
+                            self.caps & FE_CAN_TRANSMISSION_MODE_AUTO != 0,
+                            FeError::NoAutoTransmitMode);
+                    }
+                }
+                DTV_GUARD_INTERVAL => {
+                    if p.get_data() == GUARD_INTERVAL_AUTO {
+                        ensure!(
+                            self.caps & FE_CAN_GUARD_INTERVAL_AUTO != 0,
+                            FeError::NoAutoGuardInterval);
+                    }
+                }
+                DTV_HIERARCHY => {
+                    if p.get_data() == HIERARCHY_AUTO {
+                        ensure!(
+                            self.caps & FE_CAN_HIERARCHY_AUTO != 0,
+                            FeError::NoAutoHierarchy);
+                    }
+                }
+                DTV_STREAM_ID => {
+                    ensure!(
+                        self.caps & FE_CAN_MULTISTREAM != 0,
+                        FeError::NoMultistream);
+                }
                 _ => {}
             }
         }
@@ -308,7 +350,7 @@ impl FeDevice {
 
     pub fn ioctl_get_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
         let mut cmd = DtvProperties::new(cmdseq);
-        self.ioctl(FE_SET_PROPERTY, cmd.as_mut_ptr())
+        self.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())
     }
 
     #[inline]
