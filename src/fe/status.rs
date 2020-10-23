@@ -29,12 +29,17 @@ pub struct FeStatus {
 }
 
 
-impl fmt::Display for FeStatus {
+pub struct FeStatusDisplay<'a> {
+    inner: &'a FeStatus,
+}
+
+
+impl<'a> fmt::Display for FeStatusDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Status:")?;
 
-        if self.status == FE_NONE {
-            writeln!(f, " OFF")?;
+        if self.inner.status == FE_NONE {
+            write!(f, " OFF")?;
             return Ok(());
         }
 
@@ -42,55 +47,53 @@ impl fmt::Display for FeStatus {
             "SIGNAL", "CARRIER", "FEC", "SYNC", "LOCK", "TIMEOUT", "REINIT"
         ];
         for (i, s) in STATUS_MAP.iter().enumerate() {
-            if self.status & (1 << i) != 0 {
+            if self.inner.status & (1 << i) != 0 {
                 write!(f, " {}", s)?;
             }
         }
 
-        writeln!(f, "")?;
-
-        if self.status & FE_HAS_SIGNAL == 0 {
+        if self.inner.status & FE_HAS_SIGNAL == 0 {
             return Ok(());
         }
 
-        write!(f, "Signal: ")?;
-        if let Some(signal) = self.signal {
+        write!(f, "\nSignal: ")?;
+        if let Some(signal) = self.inner.signal {
             // TODO: config for lo/hi
             let lo: f64 = -85.0;
             let hi: f64 = -6.0;
             let relative = 100.0 - (signal - hi) * 100.0 / (lo - hi);
-            writeln!(f, "{:.0}% ({:.02}dBm)", relative, signal)?;
+            write!(f, "{:.0}% ({:.02}dBm)", relative, signal)?;
         } else {
-            writeln!(f, "-")?;
+            write!(f, "-")?;
         }
 
-        if self.status & FE_HAS_CARRIER == 0 {
+        if self.inner.status & FE_HAS_CARRIER == 0 {
             return Ok(());
         }
 
-        write!(f, "SNR: ")?;
-        if let Some(snr) = self.snr {
+        write!(f, "\nSNR: ")?;
+        if let Some(snr) = self.inner.snr {
             let relative = 5 * snr as u32;
-            writeln!(f, "{}% ({:.02}dB)", relative, snr)?;
+            write!(f, "{}% ({:.02}dB)", relative, snr)?;
         } else {
-            writeln!(f, "-")?;
+            write!(f, "-")?;
         }
 
-        if self.status & FE_HAS_LOCK == 0 {
+        if self.inner.status & FE_HAS_LOCK == 0 {
             return Ok(());
         }
 
-        write!(f, "BER: ")?;
-        if let Some(ber) = self.ber {
-            writeln!(f, "{}", ber & 0xFFFF)?;
+        write!(f, "\nBER: ")?;
+        if let Some(ber) = self.inner.ber {
+            write!(f, "{}", ber & 0xFFFF)?;
         } else {
-            writeln!(f, "-")?;
+            write!(f, "-")?;
         }
 
         // Last line without new line
 
-        write!(f, "UNC: ")?;
-        if let Some(unc) = self.unc {
+        write!(f, "\nUNC: ")?;
+        if let Some(unc) = self.inner.unc {
             write!(f, "{}", unc & 0xFFFF)
         } else {
             write!(f, "-")
@@ -100,6 +103,12 @@ impl fmt::Display for FeStatus {
 
 
 impl FeStatus {
+    pub fn display(&self) -> FeStatusDisplay {
+        FeStatusDisplay {
+            inner: self,
+        }
+    }
+
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
         self.status = FE_NONE;
         fe.ioctl(FE_READ_STATUS, &mut self.status as *mut _)?;

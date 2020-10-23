@@ -16,5 +16,6 @@ pub use {
         FeDevice,
         FeError,
         FeStatus,
+        FeStatusDisplay,
     },
 };
