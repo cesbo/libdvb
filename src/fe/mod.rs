@@ -50,6 +50,7 @@ pub use {
 };
 
 
+/// The error type for frontend operations
 #[derive(Debug, Error)]
 pub enum FeError {
     #[error("frontend is not char device")]
@@ -73,6 +74,7 @@ pub enum FeError {
 }
 
 
+/// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
     file: File,
@@ -125,12 +127,14 @@ impl AsRawFd for FeDevice {
 
 
 impl FeDevice {
+    /// System call for frontend device
     #[inline]
     pub fn ioctl<T>(&self, request: IoctlInt, argp: T) -> Result<()> {
         ioctl(self.as_raw_fd(), request, argp).context("fe ioctl")?;
         Ok(())
     }
 
+    /// Clears frontend settings and event queue
     pub fn clear(&self) -> Result<()> {
         let mut cmdseq = [
             DtvProperty::new(DTV_VOLTAGE, SEC_VOLTAGE_OFF),
@@ -261,12 +265,14 @@ impl FeDevice {
         Ok(())
     }
 
-    pub fn new(path: &Path, write: bool) -> Result<FeDevice> {
+    /// Attempts to open frontend device and get frontend information
+    /// If `write` is true opens frontend in Read-Write mode
+    pub fn open<P: AsRef<Path>>(path: P, write: bool) -> Result<FeDevice> {
         let file = OpenOptions::new()
             .read(true)
             .write(write)
             .custom_flags(::libc::O_NONBLOCK)
-            .open(path)
+            .open(path.as_ref())
             .context("fe open")?;
 
         let mut fe = FeDevice {
@@ -344,6 +350,7 @@ impl FeDevice {
         Ok(())
     }
 
+    /// Sets properties on frontend device
     pub fn ioctl_set_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
         self.check_cmdseq(cmdseq).context("fe property check")?;
 
@@ -351,11 +358,15 @@ impl FeDevice {
         self.ioctl(FE_SET_PROPERTY, cmd.as_ptr())
     }
 
+    /// Gets properties from frontend device
     pub fn ioctl_get_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
         let mut cmd = DtvProperties::new(cmdseq);
         self.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())
     }
 
+    /// Returns the current API version
+    /// major - first byte
+    /// minor - second byte
     #[inline]
     pub fn get_api_version(&self) -> u16 {
         self.api_version
