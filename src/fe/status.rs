@@ -62,7 +62,7 @@ impl<'a> FeStatusDisplay<'a> {
             let lo: f64 = -85.0;
             let hi: f64 = -6.0;
             let relative = 100.0 - (signal - hi) * 100.0 / (lo - hi);
-            write!(f, "{:.0}% ({:.02}dBm)", relative, signal)?;
+            write!(f, "{:.02}dBm ({:.0}%)", signal, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -74,7 +74,7 @@ impl<'a> FeStatusDisplay<'a> {
         write!(f, " Q:")?;
         if let Some(snr) = self.inner.snr {
             let relative = 5 * snr as u32;
-            write!(f, "{}% ({:.02}dB)", relative, snr)?;
+            write!(f, "{:.02}dB ({}%)", snr, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -83,14 +83,14 @@ impl<'a> FeStatusDisplay<'a> {
             return Ok(());
         }
 
-        write!(f, " BER: ")?;
+        write!(f, " BER:")?;
         if let Some(ber) = self.inner.ber {
             write!(f, "{}", ber & 0xFFFF)?;
         } else {
             write!(f, "-")?;
         }
 
-        write!(f, " UNC: ")?;
+        write!(f, " UNC:")?;
         if let Some(unc) = self.inner.unc {
             write!(f, "{}", unc & 0xFFFF)
         } else {
@@ -125,7 +125,7 @@ impl<'a> FeStatusDisplay<'a> {
             let lo: f64 = -85.0;
             let hi: f64 = -6.0;
             let relative = 100.0 - (signal - hi) * 100.0 / (lo - hi);
-            write!(f, "{:.0}% ({:.02}dBm)", relative, signal)?;
+            write!(f, "{:.02}dBm ({:.0}%)", signal, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -137,7 +137,7 @@ impl<'a> FeStatusDisplay<'a> {
         write!(f, "\nSNR: ")?;
         if let Some(snr) = self.inner.snr {
             let relative = 5 * snr as u32;
-            write!(f, "{}% ({:.02}dB)", relative, snr)?;
+            write!(f, "{:.02}dB ({}%)", snr, relative)?;
         } else {
             write!(f, "-")?;
         }
