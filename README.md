@@ -1,16 +1,12 @@
 # libdvb
 
-libdvb is an interface library to DVB devices.
+libdvb is an interface library to DVB devices via Linux DVB-API v5.
 
 Supports three types of delivery systems:
 
 - Satellite: DVB-S, DVB-S2
 - Terretrial: DVB-T, DVB-T2, ATSC, ISDB-T
 - Cable: DVB-C
-
-Implements next standards:
-
-- Linux DVB API version 5
 
 TODO:
 
@@ -20,9 +16,6 @@ TODO:
 - DiSEqC 1.1
 - EN 50494 - Unicable I
 - EN 50607 - Unicable II
-- ISO/IEC 13818-1 - MPEG-TS
-- ETSI TS 101 211 - Service Information implementation
-- ETSI TR 101 290 - Measurements for DVB systems
 
 ## FeDevice
 

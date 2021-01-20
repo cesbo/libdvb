@@ -237,7 +237,8 @@ impl FeDevice {
 
         ensure!(
             (mode & ::libc::S_IFMT) == ::libc::S_IFCHR,
-            FeError::InvalidDeviceFormat);
+            FeError::InvalidDeviceFormat
+        );
 
         let rdev = metadata.st_rdev();
         let major = unsafe { ::libc::major(rdev) };
@@ -302,46 +303,53 @@ impl FeDevice {
                     let v = p.get_data();
                     ensure!(
                         self.frequency_range.contains(&v),
-                        FeError::InvalidFrequency);
+                        FeError::InvalidFrequency
+                    );
                 }
                 DTV_SYMBOL_RATE => {
                     let v = p.get_data();
                     ensure!(
                         self.symbolrate_range.contains(&v),
-                        FeError::InvalidSymbolrate);
+                        FeError::InvalidSymbolrate
+                    );
                 }
                 DTV_INVERSION => {
                     if p.get_data() == INVERSION_AUTO {
                         ensure!(
                             self.caps & FE_CAN_INVERSION_AUTO != 0,
-                            FeError::NoAutoInversion);
+                            FeError::NoAutoInversion
+                        );
                     }
                 }
                 DTV_TRANSMISSION_MODE => {
                     if p.get_data() == TRANSMISSION_MODE_AUTO {
                         ensure!(
                             self.caps & FE_CAN_TRANSMISSION_MODE_AUTO != 0,
-                            FeError::NoAutoTransmitMode);
+                            FeError::NoAutoTransmitMode
+                        );
                     }
                 }
                 DTV_GUARD_INTERVAL => {
                     if p.get_data() == GUARD_INTERVAL_AUTO {
                         ensure!(
                             self.caps & FE_CAN_GUARD_INTERVAL_AUTO != 0,
-                            FeError::NoAutoGuardInterval);
+                            FeError::NoAutoGuardInterval
+                        );
                     }
                 }
                 DTV_HIERARCHY => {
                     if p.get_data() == HIERARCHY_AUTO {
                         ensure!(
                             self.caps & FE_CAN_HIERARCHY_AUTO != 0,
-                            FeError::NoAutoHierarchy);
+                            FeError::NoAutoHierarchy
+                        );
                     }
                 }
                 DTV_STREAM_ID => {
                     ensure!(
                         self.caps & FE_CAN_MULTISTREAM != 0,
-                        FeError::NoMultistream);
+                        FeError::NoMultistream
+                    );
                 }
                 _ => {}
             }
