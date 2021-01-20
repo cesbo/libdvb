@@ -372,6 +372,34 @@ impl FeDevice {
         self.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())
     }
 
+    /// Sets DiSEqC master command
+    ///
+    /// `msg` is a message no more 6 bytes length
+    ///
+    /// Example DiSEqC commited command:
+    ///
+    /// ```
+    /// [0xE0, 0x10, 0x38, 0xF0 | value]
+    /// ```
+    ///
+    /// - byte 1 is a framing (master command without response)
+    /// - byte 2 is an address (any LNB)
+    /// - byte 3 is a command (commited)
+    /// - last 4 bits of byte 4 is:
+    ///     - xx00 - switch input
+    ///     - 00x0 - bit is set on SEC_VOLTAGE_18
+    ///     - 000x - bit is set on SEC_TONE_ON
+    ///
+    pub fn ioctl_diseqc_master_cmd(&self, msg: &[u8]) -> Result<()> {
+        let mut cmd = DiseqcMasterCmd::default();
+        debug_assert!(msg.len() <= cmd.msg.len());
+
+        cmd.msg[0 .. msg.len()].copy_from_slice(msg);
+        cmd.len = msg.len() as u8;
+
+        self.ioctl(FE_DISEQC_SEND_MASTER_CMD, cmd.as_ptr())
+    }
+
     /// Returns the current API version
     /// major - first byte
     /// minor - second byte

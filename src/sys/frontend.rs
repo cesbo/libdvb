@@ -177,6 +177,12 @@ impl Default for DiseqcMasterCmd {
 }
 
 
+impl DiseqcMasterCmd {
+    #[inline]
+    pub fn as_ptr(&self) -> *const DiseqcMasterCmd { self as *const _ }
+}
+
+
 /// DiSEqC received data
 #[repr(C)]
 #[derive(Debug)]
