@@ -81,7 +81,8 @@ pub const fn io_none(ty: u8, nr: u8) -> IoctlInt {
         IOC_NONE,
         ty as IoctlInt,
         nr as IoctlInt,
-        0)
+        0
+    )
 }
 
 
@@ -91,7 +92,8 @@ pub const fn io_read<T>(ty: u8, nr: u8) -> IoctlInt {
         IOC_READ,
         ty as IoctlInt,
         nr as IoctlInt,
-        mem::size_of::<T>() as IoctlInt)
+        mem::size_of::<T>() as IoctlInt
+    )
 }
 
 
@@ -101,7 +103,8 @@ pub const fn io_write<T>(ty: u8, nr: u8) -> IoctlInt {
         IOC_WRITE,
         ty as IoctlInt,
         nr as IoctlInt,
-        mem::size_of::<T>() as IoctlInt)
+        mem::size_of::<T>() as IoctlInt
+    )
 }
 
 
@@ -111,7 +114,8 @@ pub const fn io_rw<T>(ty: u8, nr: u8) -> IoctlInt {
         IOC_READ | IOC_WRITE,
         ty as IoctlInt,
         nr as IoctlInt,
-        mem::size_of::<T>() as IoctlInt)
+        mem::size_of::<T>() as IoctlInt
+    )
 }
 
 
