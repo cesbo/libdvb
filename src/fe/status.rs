@@ -177,7 +177,18 @@ impl FeStatus {
     /// Returns an object that implements `Display` for different verbosity levels
     /// Verbosity levels:
     /// 0 - single line status
+    /// ```text
+    /// Status:SCVYL S:-38.56dBm (59%) Q:14.57dB (70%) BER:0 UNC:0
+    /// ```
+    ///
     /// 1 - full report
+    /// ```text
+    /// Status: SIGNAL CARRIER FEC SYNC LOCK
+    /// Signal: -38.20dBm (59%)
+    /// SNR: 14.65dB (70%)
+    /// BER: 0
+    /// UNC: 0
+    /// ```
     pub fn display(&self, verbose: u32) -> FeStatusDisplay {
         FeStatusDisplay {
             inner: self,

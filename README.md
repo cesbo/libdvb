@@ -21,7 +21,7 @@ TODO:
 
 Example DVB-S2 tune:
 
-```
+```rust
 let cmdseq = vec![
     DtvProperty::new(DTV_DELIVERY_SYSTEM, SYS_DVBS2),
     DtvProperty::new(DTV_FREQUENCY, (11044 - 9750) * 1000),
@@ -39,3 +39,20 @@ let cmdseq = vec![
 let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", true)?;
 fe.ioctl_set_property(&mut cmdseq)?;
 ```
+
+Frontend information:
+
+```rust
+let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", false)?;
+println!("{}", &fe);
+```
+
+Frontend status:
+
+```rust
+let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", false)?;
+let mut status = FeStatus::default();
+status.read(&fe)?;
+println!("{}", &status.display(1));
+```
+
