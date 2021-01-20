@@ -1,7 +1,14 @@
 [package]
 name = "libdvb"
 version = "0.2.1"
-authors = ["Cesbo Developers Team"]
+description = "Interface for DVB-API v5 devices in Linux"
+authors = ["Cesbo Developers Team <info@cesbo.com>"]
+license = "MIT"
+readme = "README.md"
+documentation = "https://docs.rs/libdvb"
+repository = "https://github.com/cesbo/libdvb"
+keywords = ["dvb", "ts"]
+categories = ["api-bindings", "hardware-support"]
 edition = "2018"
 
 [dependencies]

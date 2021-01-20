@@ -1,6 +1,6 @@
 # libdvb
 
-libdvb is an interface library to DVB devices via Linux DVB-API v5.
+libdvb is an interface library for DVB-API v5 devices in Linux.
 
 Supports three types of delivery systems:
 
