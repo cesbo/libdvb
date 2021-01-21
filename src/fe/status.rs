@@ -211,9 +211,7 @@ impl FeStatus {
             DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
             DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
         ];
-        let mut cmd = DtvProperties::new(&mut cmdseq);
-
-        fe.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())?;
+        fe.ioctl_get_property(&mut cmdseq)?;
 
         self.signal = (unsafe { cmdseq[0].u.st }).get_decibel();
         self.snr = (unsafe { cmdseq[1].u.st }).get_decibel();

@@ -710,29 +710,26 @@ pub const DTV_MAX_COMMAND: u32                          = DTV_INPUT;
 pub const DTV_IOCTL_MAX_MSGS: usize                     = 64;
 
 
-/// a set of command/value pairs
+/// a set of command/value pairs for FE_SET_PROPERTY
 #[repr(C)]
 #[derive(Debug)]
 pub struct DtvProperties {
     pub num: u32,
-    pub props: *mut DtvProperty,
+    pub props: *const DtvProperty,
 }
 
 
 impl DtvProperties {
     #[inline]
-    pub fn new(props: &mut [DtvProperty]) -> DtvProperties {
+    pub fn new(props: &[DtvProperty]) -> DtvProperties {
         DtvProperties {
             num: props.len() as u32,
-            props: props.as_mut_ptr(),
+            props: props.as_ptr(),
         }
     }
 
     #[inline]
     pub fn as_ptr(&self) -> *const DtvProperties { self as *const _ }
-
-    #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut DtvProperties { self as *mut _ }
 }
 
 
@@ -746,6 +743,9 @@ pub struct FeParameters {
     /// unimplemented frontend parameters data
     __reserved_1: [u8; 28],
 }
+
+
+pub const FE_MAX_EVENT: usize = 8;
 
 
 #[repr(C)]

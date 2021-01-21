@@ -36,23 +36,22 @@ let cmdseq = vec![
     DtvProperty::new(DTV_TUNE, 0),
 ];
 
-let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", true)?;
-fe.ioctl_set_property(&mut cmdseq)?;
+let fe = FeDevice::open_rw("/dev/dvb/adapter0/frontend0")?;
+fe.ioctl_set_property(&cmdseq)?;
 ```
 
 Frontend information:
 
 ```rust
-let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", false)?;
+let fe = FeDevice::open_rd("/dev/dvb/adapter0/frontend0")?;
 println!("{}", &fe);
 ```
 
 Frontend status:
 
 ```rust
-let fe = FeDevice::open("/dev/dvb/adapter0/frontend0", false)?;
+let fe = FeDevice::open_rd("/dev/dvb/adapter0/frontend0")?;
 let mut status = FeStatus::default();
 status.read(&fe)?;
 println!("{}", &status.display(1));
 ```
-

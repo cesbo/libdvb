@@ -18,7 +18,7 @@ use {
 fn check_frontend(path: &Path) -> Result<()> {
     println!("Frontend: {}", path.display());
 
-    let fe = FeDevice::open(path, false)?;
+    let fe = FeDevice::open_rd(path)?;
     println!("{}", &fe);
 
     let mut status = FeStatus::default();

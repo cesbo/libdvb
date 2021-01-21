@@ -21,7 +21,7 @@ pub fn start(fepath: &str) -> Result<()> {
     let fepath = Path::new(fepath);
     println!("Frontend: {}", fepath.display());
 
-    let fe = FeDevice::open(fepath, false)?;
+    let fe = FeDevice::open_rd(fepath)?;
     let mut status = FeStatus::default();
 
     let delay = Duration::from_secs(1);

@@ -136,16 +136,16 @@ impl FeDevice {
 
     /// Clears frontend settings and event queue
     pub fn clear(&self) -> Result<()> {
-        let mut cmdseq = [
+        let cmdseq = [
             DtvProperty::new(DTV_VOLTAGE, SEC_VOLTAGE_OFF),
             DtvProperty::new(DTV_TONE, SEC_TONE_OFF),
             DtvProperty::new(DTV_CLEAR, 0),
         ];
-        self.ioctl_set_property(&mut cmdseq).context("fe clear")?;
+        self.ioctl_set_property(&cmdseq).context("fe clear")?;
 
         let mut event = FeEvent::default();
 
-        for _ in 0 .. 100 {
+        for _ in 0 .. FE_MAX_EVENT {
             if self.ioctl(FE_GET_EVENT, event.as_mut_ptr()).is_err() {
                 break;
             }
@@ -266,14 +266,12 @@ impl FeDevice {
         Ok(())
     }
 
-    /// Attempts to open frontend device and get frontend information
-    /// If `write` is true opens frontend in Read-Write mode
-    pub fn open<P: AsRef<Path>>(path: P, write: bool) -> Result<FeDevice> {
+    fn open<P: AsRef<Path>>(path: P, w: bool) -> Result<FeDevice> {
         let file = OpenOptions::new()
             .read(true)
-            .write(write)
+            .write(w)
             .custom_flags(::libc::O_NONBLOCK)
-            .open(path.as_ref())
+            .open(path)
             .context("fe open")?;
 
         let mut fe = FeDevice {
@@ -295,6 +293,14 @@ impl FeDevice {
 
         Ok(fe)
     }
+
+    /// Attempts to open a frontend device in read-only mode
+    #[inline]
+    pub fn open_rd<P: AsRef<Path>>(path: P) -> Result<FeDevice> { Self::open(path, false) }
+
+    /// Attempts to open a frontend device in read-write mode
+    #[inline]
+    pub fn open_rw<P: AsRef<Path>>(path: P) -> Result<FeDevice> { Self::open(path, true) }
 
     fn check_cmdseq(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         for p in cmdseq {
@@ -359,7 +365,7 @@ impl FeDevice {
     }
 
     /// Sets properties on frontend device
-    pub fn ioctl_set_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
+    pub fn ioctl_set_property(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         self.check_cmdseq(cmdseq).context("fe property check")?;
 
         let cmd = DtvProperties::new(cmdseq);
@@ -368,8 +374,19 @@ impl FeDevice {
 
     /// Gets properties from frontend device
     pub fn ioctl_get_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
-        let mut cmd = DtvProperties::new(cmdseq);
-        self.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())
+        // same as DtvProperties but with mut props
+        #[repr(C)]
+        struct DtvPropertiesMut {
+            num: u32,
+            props: *mut DtvProperty,
+        }
+
+        let mut cmd = DtvPropertiesMut {
+            num: cmdseq.len() as u32,
+            props: cmdseq.as_mut_ptr(),
+        };
+
+        self.ioctl(FE_GET_PROPERTY, &mut cmd as *mut _)
     }
 
     /// Sets DiSEqC master command
