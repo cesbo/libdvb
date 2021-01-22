@@ -2,9 +2,11 @@
 extern crate anyhow;
 
 
-pub mod sys;
+pub mod ioctl;
+
 mod ca;
 mod fe;
+mod dmx;
 
 
 pub use {

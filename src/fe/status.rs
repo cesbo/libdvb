@@ -3,9 +3,9 @@ use {
 
     anyhow::Result,
 
-    crate::{
-        sys::frontend::*,
+    super::{
         FeDevice,
+        sys::*,
     },
 };
 

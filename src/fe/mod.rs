@@ -1,4 +1,5 @@
 mod status;
+mod sys;
 
 
 use {
@@ -32,13 +33,12 @@ use {
     libc,
     thiserror::Error,
 
-    crate::{
-        sys::{
-            ioctl,
-            IoctlInt,
-            frontend::*,
-        },
+    crate::ioctl::{
+        ioctl,
+        IoctlInt,
     },
+
+    sys::*,
 };
 
 

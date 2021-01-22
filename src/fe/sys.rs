@@ -6,7 +6,7 @@ use {
 
     libc,
 
-    super::{
+    crate::ioctl::{
         IoctlInt,
         io_none,
         io_read,

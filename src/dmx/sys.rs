@@ -1,5 +1,5 @@
 use {
-    super::{
+    crate::ioctl::{
         IoctlInt,
         io_none,
         io_write,

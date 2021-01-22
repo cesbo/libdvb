@@ -3,7 +3,7 @@ use {
         mem,
     },
 
-    super::{
+    crate::ioctl::{
         IoctlInt,
         io_none,
         io_read,
