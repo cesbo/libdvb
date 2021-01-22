@@ -3,10 +3,9 @@ extern crate anyhow;
 
 
 pub mod ioctl;
-
-mod ca;
-mod fe;
-mod dmx;
+pub mod ca;
+pub mod fe;
+pub mod dmx;
 
 
 pub use {
@@ -16,8 +15,6 @@ pub use {
 
     fe::{
         FeDevice,
-        FeError,
         FeStatus,
-        FeStatusDisplay,
     },
 };

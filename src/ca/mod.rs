@@ -2,7 +2,7 @@ mod asn1;
 mod tpdu;
 mod spdu;
 mod apdu;
-mod sys;
+pub mod sys;
 
 
 use {
