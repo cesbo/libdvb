@@ -14,7 +14,10 @@ use {
         ops::Range,
         os::linux::fs::MetadataExt,
         os::unix::{
-            fs::OpenOptionsExt,
+            fs::{
+                OpenOptionsExt,
+                FileTypeExt,
+            },
             io::{
                 AsRawFd,
                 RawFd,
@@ -233,10 +236,9 @@ impl FeDevice {
         // dev-file metadata
 
         let metadata = self.file.metadata().context("fe get device metadata")?;
-        let mode = metadata.st_mode();
 
         ensure!(
-            (mode & ::libc::S_IFMT) == ::libc::S_IFCHR,
+            metadata.file_type().is_char_device(),
             FeError::InvalidDeviceFormat
         );
 

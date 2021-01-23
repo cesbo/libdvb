@@ -4,8 +4,6 @@ use {
         mem,
     },
 
-    libc,
-
     crate::ioctl::{
         IoctlInt,
         io_none,
@@ -510,7 +508,7 @@ pub struct DtvPropertyBuffer {
     pub data: [u8; 32],
     pub len: u32,
     __reserved_1: [u32; 3],
-    __reserved_2: *mut libc::c_void,
+    __reserved_2: *mut std::ffi::c_void,
 }
 
 
