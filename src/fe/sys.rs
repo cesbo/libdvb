@@ -118,7 +118,7 @@ mod fe_type {
 #[derive(Debug)]
 pub struct FeInfo {
     /// Name of the frontend
-    pub name: [u8; 128],
+    pub name: [std::os::raw::c_char; 128],
     /// DEPRECATED: frontend delivery system
     pub fe_type: u32,
     /// Minimal frequency supported by the frontend
@@ -710,7 +710,6 @@ pub const DTV_IOCTL_MAX_MSGS: usize                     = 64;
 
 /// a set of command/value pairs for FE_SET_PROPERTY
 #[repr(C)]
-#[derive(Debug)]
 pub struct DtvProperties {
     pub num: u32,
     pub props: *const DtvProperty,
@@ -719,15 +718,22 @@ pub struct DtvProperties {
 
 impl DtvProperties {
     #[inline]
-    pub fn new(props: &[DtvProperty]) -> DtvProperties {
-        DtvProperties {
-            num: props.len() as u32,
-            props: props.as_ptr(),
-        }
-    }
-
-    #[inline]
     pub fn as_ptr(&self) -> *const DtvProperties { self as *const _ }
+}
+
+
+// a set of command/value pairs for FE_GET_PROPERTY
+#[repr(C)]
+#[derive(Debug)]
+pub struct DtvPropertiesMut {
+    pub num: u32,
+    pub props: *mut DtvProperty,
+}
+
+
+impl DtvPropertiesMut {
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut DtvPropertiesMut { self as *mut _ }
 }
 
 
@@ -770,7 +776,7 @@ pub const FE_GET_INFO: IoctlInt = io_read::<FeInfo>(b'o', 61);
 
 pub const FE_DISEQC_RESET_OVERLOAD: IoctlInt = io_none(b'o', 62);
 pub const FE_DISEQC_SEND_MASTER_CMD: IoctlInt = io_write::<DiseqcMasterCmd>(b'o', 63);
-pub const FE_DISEQC_RECV_SLAVE_REPLY: IoctlInt = io_read::<DiseqcSlaveReply>(b'0', 64);
+pub const FE_DISEQC_RECV_SLAVE_REPLY: IoctlInt = io_read::<DiseqcSlaveReply>(b'o', 64);
 pub const FE_DISEQC_SEND_BURST: IoctlInt = io_none(b'o', 65);
 
 pub const FE_SET_TONE: IoctlInt = io_none(b'o', 66);
@@ -787,4 +793,4 @@ pub const FE_GET_EVENT: IoctlInt = io_read::<FeEvent>(b'o', 78);
 pub const FE_SET_FRONTEND_TUNE_MODE: IoctlInt = io_none(b'o', 81);
 
 pub const FE_SET_PROPERTY: IoctlInt = io_write::<DtvProperties>(b'o', 82);
-pub const FE_GET_PROPERTY: IoctlInt = io_read::<DtvProperties>(b'o', 83);
+pub const FE_GET_PROPERTY: IoctlInt = io_read::<DtvPropertiesMut>(b'o', 83);

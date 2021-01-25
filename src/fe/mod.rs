@@ -33,7 +33,6 @@ use {
         Context,
         Result,
     },
-    libc,
     thiserror::Error,
 
     crate::ioctl::{
@@ -201,8 +200,8 @@ impl FeDevice {
         let mut feinfo = FeInfo::default();
         self.ioctl(FE_GET_INFO, feinfo.as_mut_ptr()).context("fe get info")?;
 
-        let len = unsafe { libc::strnlen(feinfo.name.as_ptr() as *const _, feinfo.name.len()) };
-        if let Ok(name) = CStr::from_bytes_with_nul(&feinfo.name[.. len + 1]) {
+        if let Some(len) = feinfo.name.iter().position(|&b| b == 0) {
+            let name = unsafe { CStr::from_ptr(feinfo.name[.. len + 1].as_ptr()) };
             if let Ok(name) = name.to_str() {
                 self.name = name.to_owned();
             }
@@ -370,25 +369,23 @@ impl FeDevice {
     pub fn ioctl_set_property(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         self.check_cmdseq(cmdseq).context("fe property check")?;
 
-        let cmd = DtvProperties::new(cmdseq);
+        let cmd = DtvProperties {
+            num: cmdseq.len() as u32,
+            props: cmdseq.as_ptr(),
+        };
+
         self.ioctl(FE_SET_PROPERTY, cmd.as_ptr())
     }
 
     /// Gets properties from frontend device
     pub fn ioctl_get_property(&self, cmdseq: &mut [DtvProperty]) -> Result<()> {
-        // same as DtvProperties but with mut props
-        #[repr(C)]
-        struct DtvPropertiesMut {
-            num: u32,
-            props: *mut DtvProperty,
-        }
 
         let mut cmd = DtvPropertiesMut {
             num: cmdseq.len() as u32,
             props: cmdseq.as_mut_ptr(),
         };
 
-        self.ioctl(FE_GET_PROPERTY, &mut cmd as *mut _)
+        self.ioctl(FE_GET_PROPERTY, cmd.as_mut_ptr())
     }
 
     /// Sets DiSEqC master command
