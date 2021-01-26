@@ -1,7 +1,17 @@
 use {
-    std::fmt,
+    std::{
+        fmt,
+        os::unix::io::AsRawFd,
+    },
 
-    anyhow::Result,
+    anyhow::{
+        Context,
+        Result,
+    },
+
+    nix::{
+        ioctl_read,
+    },
 
     super::{
         FeDevice,
@@ -199,7 +209,11 @@ impl FeStatus {
     /// Reads frontend status
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
         self.status = FE_NONE;
-        fe.ioctl(FE_READ_STATUS, &mut self.status as *mut _)?;
+
+        ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
+        unsafe {
+            ioctl_call(fe.as_raw_fd(), &mut self.status as *mut _)
+        }.context("frontend read status")?;
 
         if self.status == FE_NONE {
             return Ok(());
@@ -211,7 +225,7 @@ impl FeStatus {
             DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
             DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
         ];
-        fe.ioctl_get_property(&mut cmdseq)?;
+        fe.get_properties(&mut cmdseq)?;
 
         self.signal = (unsafe { cmdseq[0].u.st }).get_decibel();
         self.snr = (unsafe { cmdseq[1].u.st }).get_decibel();

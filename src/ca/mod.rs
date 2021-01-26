@@ -97,7 +97,7 @@ impl CaDevice {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(::libc::O_NONBLOCK)
+            .custom_flags(::nix::libc::O_NONBLOCK)
             .open(path)
             .with_context(|| format!("CA: failed to open device {}", path.display()))?;
 

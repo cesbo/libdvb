@@ -8,7 +8,6 @@ use {
         IoctlInt,
         io_none,
         io_read,
-        io_write,
     },
 };
 
@@ -172,12 +171,6 @@ pub struct DiseqcMasterCmd {
 impl Default for DiseqcMasterCmd {
     #[inline]
     fn default() -> Self { unsafe { mem::zeroed::<Self>() } }
-}
-
-
-impl DiseqcMasterCmd {
-    #[inline]
-    pub fn as_ptr(&self) -> *const DiseqcMasterCmd { self as *const _ }
 }
 
 
@@ -708,35 +701,6 @@ pub const DTV_MAX_COMMAND: u32                          = DTV_INPUT;
 pub const DTV_IOCTL_MAX_MSGS: usize                     = 64;
 
 
-/// a set of command/value pairs for FE_SET_PROPERTY
-#[repr(C)]
-pub struct DtvProperties {
-    pub num: u32,
-    pub props: *const DtvProperty,
-}
-
-
-impl DtvProperties {
-    #[inline]
-    pub fn as_ptr(&self) -> *const DtvProperties { self as *const _ }
-}
-
-
-// a set of command/value pairs for FE_GET_PROPERTY
-#[repr(C)]
-#[derive(Debug)]
-pub struct DtvPropertiesMut {
-    pub num: u32,
-    pub props: *mut DtvProperty,
-}
-
-
-impl DtvPropertiesMut {
-    #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut DtvPropertiesMut { self as *mut _ }
-}
-
-
 #[repr(C)]
 #[derive(Debug)]
 pub struct FeParameters {
@@ -772,10 +736,7 @@ impl FeEvent {
 }
 
 
-pub const FE_GET_INFO: IoctlInt = io_read::<FeInfo>(b'o', 61);
-
 pub const FE_DISEQC_RESET_OVERLOAD: IoctlInt = io_none(b'o', 62);
-pub const FE_DISEQC_SEND_MASTER_CMD: IoctlInt = io_write::<DiseqcMasterCmd>(b'o', 63);
 pub const FE_DISEQC_RECV_SLAVE_REPLY: IoctlInt = io_read::<DiseqcSlaveReply>(b'o', 64);
 pub const FE_DISEQC_SEND_BURST: IoctlInt = io_none(b'o', 65);
 
@@ -783,14 +744,9 @@ pub const FE_SET_TONE: IoctlInt = io_none(b'o', 66);
 pub const FE_SET_VOLTAGE: IoctlInt = io_none(b'o', 67);
 pub const FE_ENABLE_HIGH_LNB_VOLTAGE: IoctlInt = io_none(b'o', 68);
 
-pub const FE_READ_STATUS: IoctlInt = io_read::<u32>(b'o', 69);
 pub const FE_READ_BER: IoctlInt = io_read::<u32>(b'o', 70);
 pub const FE_READ_SIGNAL_STRENGTH: IoctlInt = io_read::<u16>(b'o', 71);
 pub const FE_READ_SNR: IoctlInt = io_read::<u16>(b'o', 72);
 pub const FE_READ_UNCORRECTED_BLOCKS: IoctlInt = io_read::<u32>(b'o', 73);
 
-pub const FE_GET_EVENT: IoctlInt = io_read::<FeEvent>(b'o', 78);
 pub const FE_SET_FRONTEND_TUNE_MODE: IoctlInt = io_none(b'o', 81);
-
-pub const FE_SET_PROPERTY: IoctlInt = io_write::<DtvProperties>(b'o', 82);
-pub const FE_GET_PROPERTY: IoctlInt = io_read::<DtvPropertiesMut>(b'o', 83);

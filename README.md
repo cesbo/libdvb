@@ -37,7 +37,7 @@ let cmdseq = vec![
 ];
 
 let fe = FeDevice::open_rw("/dev/dvb/adapter0/frontend0")?;
-fe.ioctl_set_property(&cmdseq)?;
+fe.set_properties(&cmdseq)?;
 ```
 
 Frontend information:
