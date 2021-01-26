@@ -16,7 +16,10 @@ use {
         },
         os::unix::{
             fs::OpenOptionsExt,
-            io::AsRawFd,
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
         time::Duration,
         thread,
@@ -27,9 +30,9 @@ use {
         Context,
     },
 
-    crate::ioctl::{
-        ioctl,
-        IoctlInt,
+    nix::{
+        ioctl_none,
+        ioctl_read,
     },
 
     sys::*,
@@ -44,16 +47,22 @@ pub struct CaDevice {
 }
 
 
+impl AsRawFd for CaDevice {
+    #[inline]
+    fn as_raw_fd(&self) -> RawFd { self.file.as_raw_fd() }
+}
+
+
 impl CaDevice {
     #[inline]
-    pub fn ioctl<T>(&self, request: IoctlInt, argp: T) -> Result<()> {
-        ioctl(self.file.as_raw_fd(), request, argp)?;
-        Ok(())
-    }
-
-    #[inline]
     pub fn reset(&mut self) -> Result<()> {
-        self.ioctl(CA_RESET, 0).context("CA: failed to reset slot")?;
+        // CA_RESET
+        ioctl_none!(#[inline] ca_reset, b'o', 128);
+
+        unsafe {
+            ca_reset(self.as_raw_fd())
+        }.context("CA: failed to reset")?;
+
         Ok(())
     }
 
@@ -62,8 +71,12 @@ impl CaDevice {
 
     fn get_info(&mut self) -> Result<()> {
         let mut caps = CaCaps::default();
-        self.ioctl(CA_GET_CAP, caps.as_mut_ptr())
-            .context("CA: failed to get ca caps")?;
+
+        // CA_GET_CAP
+        ioctl_read!(#[inline] ca_get_cap, b'o', 129, CaCaps);
+        unsafe {
+            ca_get_cap(self.as_raw_fd(), &mut caps as *mut _)
+        }.context("CA: failed to get caps")?;
 
         if caps.slot_num == 0 {
             return Ok(());
@@ -78,8 +91,12 @@ impl CaDevice {
 
         let mut slot_info = CaSlotInfo::default();
         slot_info.num = self.slot_id as i32;
-        self.ioctl(CA_GET_SLOT_INFO, slot_info.as_mut_ptr())
-            .context("CA: failed to get slot info")?;
+
+        // CA_GET_SLOT_INFO
+        ioctl_read!(#[inline] ca_get_slot_info, b'o', 130, CaSlotInfo);
+        unsafe {
+            ca_get_slot_info(self.as_raw_fd(), &mut slot_info as *mut _)
+        }.context("CA: failed to get slot info")?;
 
         if slot_info.flags == CA_CI_MODULE_NOT_FOUND {
             println!("CA: module not found");

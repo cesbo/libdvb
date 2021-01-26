@@ -2,13 +2,6 @@ use {
     std::{
         mem,
     },
-
-    crate::ioctl::{
-        IoctlInt,
-        io_none,
-        io_read,
-        io_write,
-    },
 };
 
 
@@ -55,12 +48,6 @@ pub struct CaSlotInfo {
 }
 
 
-impl CaSlotInfo {
-    #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut CaSlotInfo { self as *mut _ }
-}
-
-
 mod ca_descr_type {
     /// European Common Descrambler (ECD) hardware
     pub const CA_ECD: u32               = 1;
@@ -94,12 +81,6 @@ pub struct CaCaps {
     pub descr_num: u32,
     /// bitmap with all supported types as defined at ca_descr_info
     pub descr_type: u32,
-}
-
-
-impl CaCaps {
-    #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut CaCaps { self as *mut _ }
 }
 
 
@@ -146,11 +127,9 @@ pub struct CaPid {
 }
 
 
-pub const CA_RESET: IoctlInt = io_none(b'o', 128);
-pub const CA_GET_CAP: IoctlInt = io_read::<CaCaps>(b'o', 129);
-pub const CA_GET_SLOT_INFO: IoctlInt = io_read::<CaSlotInfo>(b'o', 130);
-pub const CA_GET_DESCR_INFO: IoctlInt = io_read::<CaDescrInfo>(b'o', 131);
-pub const CA_GET_MSG: IoctlInt = io_read::<CaMsg>(b'o', 132);
-pub const CA_SEND_MSG: IoctlInt = io_write::<CaMsg>(b'o', 133);
-pub const CA_SET_DESCR: IoctlInt = io_write::<CaDescr>(b'o', 134);
-pub const CA_SET_PID: IoctlInt = io_write::<CaPid>(b'o', 135);
+// pub const CA_GET_SLOT_INFO: IoctlInt = io_read::<CaSlotInfo>(b'o', 130);
+// pub const CA_GET_DESCR_INFO: IoctlInt = io_read::<CaDescrInfo>(b'o', 131);
+// pub const CA_GET_MSG: IoctlInt = io_read::<CaMsg>(b'o', 132);
+// pub const CA_SEND_MSG: IoctlInt = io_write::<CaMsg>(b'o', 133);
+// pub const CA_SET_DESCR: IoctlInt = io_write::<CaDescr>(b'o', 134);
+// pub const CA_SET_PID: IoctlInt = io_write::<CaPid>(b'o', 135);
