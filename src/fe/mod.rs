@@ -33,6 +33,8 @@ use {
     nix::{
         ioctl_read,
         ioctl_write_ptr,
+        ioctl_write_int_bad,
+        request_code_none,
     },
 
     sys::*,
@@ -337,6 +339,50 @@ impl FeDevice {
         unsafe {
             ioctl_call(self.as_raw_fd(), event as *mut _)
         }.context("frontend get event")?;
+
+        Ok(())
+    }
+
+    /// Turns on/off generation of the continuous 22kHz tone
+    ///
+    /// allowed `value`'s:
+    ///
+    /// - SEC_TONE_ON - turn 22kHz on
+    /// - SEC_TONE_OFF - turn 22kHz off
+    pub fn set_tone(&self, value: u32) -> Result<()> {
+        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 66));
+
+        unsafe {
+            ioctl_call(self.as_raw_fd(), value as _)
+        }.context("frontend set tone")?;
+
+        Ok(())
+    }
+
+    /// Sets the DC voltage level for LNB
+    ///
+    /// allowed `value`'s:
+    ///
+    /// - SEC_VOLTAGE_13 for 13V
+    /// - SEC_VOLTAGE_18 for 18V
+    /// - SEC_VOLTAGE_OFF turns LNB power supply off
+    ///
+    /// Different power levels used to select internal antennas for different polarizations:
+    ///
+    /// - 13V:
+    ///     - Vertical in linear LNB
+    ///     - Right in circular LNB
+    /// - 18V:
+    ///     - Horizontal in linear LNB
+    ///     - Left in circular LNB
+    /// - OFF is needed with external power supply, for example
+    ///   to use same LNB with several receivers.
+    pub fn set_voltage(&self, value: u32) -> Result<()> {
+        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 67));
+
+        unsafe {
+            ioctl_call(self.as_raw_fd(), value as _)
+        }.context("frontend set voltage")?;
 
         Ok(())
     }
