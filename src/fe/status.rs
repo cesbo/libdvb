@@ -210,6 +210,7 @@ impl FeStatus {
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
         self.status = FE_NONE;
 
+        // FE_READ_STATUS
         ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
         unsafe {
             ioctl_call(fe.as_raw_fd(), &mut self.status as *mut _)

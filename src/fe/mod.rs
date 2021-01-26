@@ -144,6 +144,7 @@ impl FeDevice {
     fn get_info(&mut self) -> Result<()> {
         let mut feinfo = FeInfo::default();
 
+        // FE_GET_INFO
         ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _)
@@ -303,6 +304,7 @@ impl FeDevice {
             props: cmdseq.as_ptr(),
         };
 
+        // FE_SET_PROPERTY
         ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
@@ -324,6 +326,7 @@ impl FeDevice {
             props: cmdseq.as_mut_ptr(),
         };
 
+        // FE_GET_PROPERTY
         ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut cmd as *mut _)
@@ -334,6 +337,7 @@ impl FeDevice {
 
     /// Returns a frontend events if available
     pub fn get_event(&self, event: &mut FeEvent) -> Result<()> {
+        // FE_GET_EVENT
         ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
 
         unsafe {
@@ -350,6 +354,7 @@ impl FeDevice {
     /// - SEC_TONE_ON - turn 22kHz on
     /// - SEC_TONE_OFF - turn 22kHz off
     pub fn set_tone(&self, value: u32) -> Result<()> {
+        // FE_SET_TONE
         ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 66));
 
         unsafe {
@@ -378,6 +383,7 @@ impl FeDevice {
     /// - OFF is needed with external power supply, for example
     ///   to use same LNB with several receivers.
     pub fn set_voltage(&self, value: u32) -> Result<()> {
+        // FE_SET_VOLTAGE
         ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 67));
 
         unsafe {
@@ -412,6 +418,7 @@ impl FeDevice {
         cmd.msg[0 .. msg.len()].copy_from_slice(msg);
         cmd.len = msg.len() as u8;
 
+        // FE_DISEQC_SEND_MASTER_CMD
         ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
