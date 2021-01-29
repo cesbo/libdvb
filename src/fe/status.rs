@@ -82,8 +82,12 @@ impl fmt::Display for FeStatus {
         }
 
         write!(f, " S:")?;
-        if let Some((decibel, relative)) = self.get_signal_level() {
-            write!(f, "{:.02}dBm ({:.0}%)", decibel, relative)?;
+        if let Some(s) = self.get_signal_level() {
+            // TODO: config for lo/hi
+            let lo: f64 = -85.0;
+            let hi: f64 = -6.0;
+            let relative = 100.0 - (s - hi) * 100.0 / (lo - hi);
+            write!(f, "{:.02}dBm ({:.0}%)", s, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -93,8 +97,9 @@ impl fmt::Display for FeStatus {
         }
 
         write!(f, " Q:")?;
-        if let Some((decibel, relative)) = self.get_signal_noise_ratio() {
-            write!(f, "{:.02}dB ({}%)", decibel, relative)?;
+        if let Some(q) = self.get_signal_noise_ratio() {
+            let relative = q * 2.;
+            write!(f, "{:.02}dB ({:.0}%)", q, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -123,22 +128,27 @@ impl fmt::Display for FeStatus {
 
 
 impl FeStatus {
-    fn get_signal_level(&self) -> Option<(f64, u64)> {
-        let stats = self.props.get(0)?;
-        let _stats = unsafe { &stats.u.st };
-        // TODO: config for lo/hi
-        // let lo: f64 = -85.0;
-        // let hi: f64 = -6.0;
-        // let relative = 100.0 - (decibel - hi) * 100.0 / (lo - hi);
+    fn get_stats_decibel(&self, u: usize) -> Option<f64> {
+        let stats = self.props.get(u)?;
+        let stats = unsafe { &stats.u.st };
+
+        let len = ::std::cmp::min(stats.len as usize, stats.stat.len());
+        for s in stats.stat[.. len].iter() {
+            if s.scale == FE_SCALE_DECIBEL {
+                return Some((s.value as f64) / 1000.0);
+            }
+        }
+
         None
     }
 
-    fn get_signal_noise_ratio(&self) -> Option<(f64, u64)> {
-        let stats = self.props.get(1)?;
-        let _stats = unsafe { &stats.u.st };
-        // let relative = 5 * decibel as u32;
-        None
-    }
+    /// Returns Signal Level in dBm
+    #[inline]
+    pub fn get_signal_level(&self) -> Option<f64> { self.get_stats_decibel(0) }
+
+    /// Returns Signal to noise ratio in dB
+    #[inline]
+    pub fn get_signal_noise_ratio(&self) -> Option<f64> { self.get_stats_decibel(1) }
 
     fn get_stats_counter(&self, u: usize) -> Option<u32> {
         let stats = self.props.get(u)?;
