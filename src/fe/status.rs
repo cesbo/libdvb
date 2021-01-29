@@ -21,22 +21,32 @@ use {
 
 
 /// Frontend status
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct FeStatus {
     /// `sys::frontend::fe_status`
     status: u32,
 
-    /// signal level in dBm
-    signal: Option<f64>,
+    /// properties
+    props: [DtvProperty; 4],
+}
 
-    /// signal-to-noise ratio in dB
-    snr: Option<f64>,
 
-    /// number of bit errors before the forward error correction coding
-    ber: Option<u64>,
-
-    /// number of block errors after the outer forward error correction coding
-    unc: Option<u64>,
+impl Default for FeStatus {
+    fn default() -> FeStatus {
+        FeStatus {
+            status: 0,
+            props: [
+                // 0: signal level
+                DtvProperty::new(DTV_STAT_SIGNAL_STRENGTH, 0),
+                // 1: signal-to-noise ratio
+                DtvProperty::new(DTV_STAT_CNR, 0),
+                // 2: ber - number of bit errors
+                DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
+                // 3: unc - number of block errors
+                DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
+            ],
+        }
+    }
 }
 
 
@@ -67,12 +77,8 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, " S:")?;
-        if let Some(signal) = self.inner.signal {
-            // TODO: config for lo/hi
-            let lo: f64 = -85.0;
-            let hi: f64 = -6.0;
-            let relative = 100.0 - (signal - hi) * 100.0 / (lo - hi);
-            write!(f, "{:.02}dBm ({:.0}%)", signal, relative)?;
+        if let Some((decibel, relative)) = self.inner.get_signal_level() {
+            write!(f, "{:.02}dBm ({:.0}%)", decibel, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -82,9 +88,8 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, " Q:")?;
-        if let Some(snr) = self.inner.snr {
-            let relative = 5 * snr as u32;
-            write!(f, "{:.02}dB ({}%)", snr, relative)?;
+        if let Some((decibel, relative)) = self.inner.get_signal_noise_ratio() {
+            write!(f, "{:.02}dB ({}%)", decibel, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -94,14 +99,14 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, " BER:")?;
-        if let Some(ber) = self.inner.ber {
+        if let Some(ber) = self.inner.props[2].get_stats_counter() {
             write!(f, "{}", ber & 0xFFFF)?;
         } else {
             write!(f, "-")?;
         }
 
         write!(f, " UNC:")?;
-        if let Some(unc) = self.inner.unc {
+        if let Some(unc) = self.inner.props[3].get_stats_counter() {
             write!(f, "{}", unc & 0xFFFF)
         } else {
             write!(f, "-")
@@ -130,12 +135,8 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, "\nSignal: ")?;
-        if let Some(signal) = self.inner.signal {
-            // TODO: config for lo/hi
-            let lo: f64 = -85.0;
-            let hi: f64 = -6.0;
-            let relative = 100.0 - (signal - hi) * 100.0 / (lo - hi);
-            write!(f, "{:.02}dBm ({:.0}%)", signal, relative)?;
+        if let Some((decibel, relative)) = self.inner.get_signal_level() {
+            write!(f, "{:.02}dBm ({:.0}%)", decibel, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -145,9 +146,8 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, "\nSNR: ")?;
-        if let Some(snr) = self.inner.snr {
-            let relative = 5 * snr as u32;
-            write!(f, "{:.02}dB ({}%)", snr, relative)?;
+        if let Some((decibel, relative)) = self.inner.get_signal_noise_ratio() {
+            write!(f, "{:.02}dB ({}%)", decibel, relative)?;
         } else {
             write!(f, "-")?;
         }
@@ -157,14 +157,14 @@ impl<'a> FeStatusDisplay<'a> {
         }
 
         write!(f, "\nBER: ")?;
-        if let Some(ber) = self.inner.ber {
+        if let Some(ber) = self.inner.props[2].get_stats_counter() {
             write!(f, "{}", ber & 0xFFFF)?;
         } else {
             write!(f, "-")?;
         }
 
         write!(f, "\nUNC: ")?;
-        if let Some(unc) = self.inner.unc {
+        if let Some(unc) = self.inner.props[3].get_stats_counter() {
             write!(f, "{}", unc & 0xFFFF)
         } else {
             write!(f, "-")
@@ -206,6 +206,19 @@ impl FeStatus {
         }
     }
 
+    fn get_signal_level(&self) -> Option<(f64, u64)> {
+        // TODO: config for lo/hi
+        // let lo: f64 = -85.0;
+        // let hi: f64 = -6.0;
+        // let relative = 100.0 - (decibel - hi) * 100.0 / (lo - hi);
+        None
+    }
+
+    fn get_signal_noise_ratio(&self) -> Option<(f64, u64)> {
+        // let relative = 5 * decibel as u32;
+        None
+    }
+
     /// Reads frontend status
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
         self.status = FE_NONE;
@@ -220,18 +233,7 @@ impl FeStatus {
             return Ok(());
         }
 
-        let mut cmdseq = [
-            DtvProperty::new(DTV_STAT_SIGNAL_STRENGTH, 0),
-            DtvProperty::new(DTV_STAT_CNR, 0),
-            DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
-            DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
-        ];
-        fe.get_properties(&mut cmdseq)?;
-
-        self.signal = (unsafe { cmdseq[0].u.st }).get_decibel();
-        self.snr = (unsafe { cmdseq[1].u.st }).get_decibel();
-        self.ber = (unsafe { cmdseq[2].u.st }).get_counter();
-        self.unc = (unsafe { cmdseq[3].u.st }).get_counter();
+        fe.get_properties(&mut self.props)?;
 
         Ok(())
     }

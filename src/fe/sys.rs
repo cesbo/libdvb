@@ -454,7 +454,7 @@ impl fmt::Debug for DtvStats {
             }
             FE_SCALE_RELATIVE => {
                 s.field(FIELD_SCALE, &"FE_SCALE_RELATIVE");
-                s.field(FIELD_VALUE, &{self.value as u64});
+                s.field(FIELD_VALUE, &{(self.value as u64) * 100 / 65535});
             }
             FE_SCALE_COUNTER => {
                 s.field(FIELD_SCALE, &"FE_SCALE_COUNTER");
@@ -484,33 +484,8 @@ pub struct DtvFrontendStats {
 
 impl fmt::Debug for DtvFrontendStats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let stats = &self.stat[0 .. self.len as usize];
-        f.debug_list().entries(stats.iter()).finish()
-    }
-}
-
-
-impl DtvFrontendStats {
-    pub fn get_counter(&self) -> Option<u64> {
-        for i in 0 .. ::std::cmp::min(self.len as usize, self.stat.len()) {
-            let s = &self.stat[i];
-            if s.scale == FE_SCALE_COUNTER {
-                return Some(s.value as u64);
-            }
-        }
-
-        None
-    }
-
-    pub fn get_decibel(&self) -> Option<f64> {
-        for i in 0 .. ::std::cmp::min(self.len as usize, self.stat.len()) {
-            let s = &self.stat[i];
-            if s.scale == FE_SCALE_DECIBEL {
-                return Some((s.value as f64) / 1000.0);
-            }
-        }
-
-        None
+        let len = ::std::cmp::min(self.len as usize, self.stat.len());
+        f.debug_list().entries(self.stat[0 .. len].iter()).finish()
     }
 }
 
@@ -708,12 +683,29 @@ impl fmt::Debug for DtvProperty {
                 s.field(FIELD_CMD, &"DTV_STAT_CNR");
                 s.field(FIELD_STATS, unsafe { &self.u.st });
             }
+
             DTV_STAT_PRE_ERROR_BIT_COUNT => {
                 s.field(FIELD_CMD, &"DTV_STAT_PRE_ERROR_BIT_COUNT");
                 s.field(FIELD_STATS, unsafe { &self.u.st });
             }
+            DTV_STAT_PRE_TOTAL_BIT_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_PRE_TOTAL_BIT_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_POST_ERROR_BIT_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_POST_ERROR_BIT_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_POST_TOTAL_BIT_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_POST_TOTAL_BIT_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
             DTV_STAT_ERROR_BLOCK_COUNT => {
                 s.field(FIELD_CMD, &"DTV_STAT_ERROR_BLOCK_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_TOTAL_BLOCK_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_TOTAL_BLOCK_COUNT");
                 s.field(FIELD_STATS, unsafe { &self.u.st });
             }
 
@@ -738,9 +730,27 @@ impl DtvProperty {
         }
     }
 
-    #[inline]
-    pub fn get_data(&self) -> u32 {
-        unsafe { self.u.data }
+    pub fn get_stats_counter(&self) -> Option<u64> {
+        match self.cmd {
+            DTV_STAT_PRE_ERROR_BIT_COUNT |
+            DTV_STAT_PRE_TOTAL_BIT_COUNT |
+            DTV_STAT_POST_ERROR_BIT_COUNT |
+            DTV_STAT_POST_TOTAL_BIT_COUNT |
+            DTV_STAT_ERROR_BLOCK_COUNT |
+            DTV_STAT_TOTAL_BLOCK_COUNT => {
+                let stats = unsafe { &self.u.st };
+                if stats.len > 0 {
+                    let s = &stats.stat[0];
+                    if s.scale == FE_SCALE_COUNTER {
+                        return Some(s.value as u64);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        None
     }
 }
 

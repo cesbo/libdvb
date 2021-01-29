@@ -231,21 +231,22 @@ impl FeDevice {
         for p in cmdseq {
             match p.cmd {
                 DTV_FREQUENCY => {
-                    let v = p.get_data();
+                    let v = unsafe { p.u.data };
                     ensure!(
                         self.frequency_range.contains(&v),
                         FeError::InvalidFrequency
                     );
                 }
                 DTV_SYMBOL_RATE => {
-                    let v = p.get_data();
+                    let v = unsafe { p.u.data };
                     ensure!(
                         self.symbolrate_range.contains(&v),
                         FeError::InvalidSymbolrate
                     );
                 }
                 DTV_INVERSION => {
-                    if p.get_data() == INVERSION_AUTO {
+                    let v = unsafe { p.u.data };
+                    if v == INVERSION_AUTO {
                         ensure!(
                             self.caps & FE_CAN_INVERSION_AUTO != 0,
                             FeError::NoAutoInversion
@@ -253,7 +254,8 @@ impl FeDevice {
                     }
                 }
                 DTV_TRANSMISSION_MODE => {
-                    if p.get_data() == TRANSMISSION_MODE_AUTO {
+                    let v = unsafe { p.u.data };
+                    if v == TRANSMISSION_MODE_AUTO {
                         ensure!(
                             self.caps & FE_CAN_TRANSMISSION_MODE_AUTO != 0,
                             FeError::NoAutoTransmitMode
@@ -261,7 +263,8 @@ impl FeDevice {
                     }
                 }
                 DTV_GUARD_INTERVAL => {
-                    if p.get_data() == GUARD_INTERVAL_AUTO {
+                    let v = unsafe { p.u.data };
+                    if v == GUARD_INTERVAL_AUTO {
                         ensure!(
                             self.caps & FE_CAN_GUARD_INTERVAL_AUTO != 0,
                             FeError::NoAutoGuardInterval
@@ -269,7 +272,8 @@ impl FeDevice {
                     }
                 }
                 DTV_HIERARCHY => {
-                    if p.get_data() == HIERARCHY_AUTO {
+                    let v = unsafe { p.u.data };
+                    if v == HIERARCHY_AUTO {
                         ensure!(
                             self.caps & FE_CAN_HIERARCHY_AUTO != 0,
                             FeError::NoAutoHierarchy
