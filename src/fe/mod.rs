@@ -125,7 +125,7 @@ impl FeDevice {
             DtvProperty::new(DTV_TONE, SEC_TONE_OFF),
             DtvProperty::new(DTV_CLEAR, 0),
         ];
-        self.set_properties(&cmdseq).context("frontend clear")?;
+        self.set_properties(&cmdseq).context("FE: clear")?;
 
         let mut event = FeEvent::default();
 
@@ -145,7 +145,7 @@ impl FeDevice {
         ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _)
-        }.context("frontend get info")?;
+        }.context("FE: get info")?;
 
         if let Some(len) = feinfo.name.iter().position(|&b| b == 0) {
             let name = unsafe { CStr::from_ptr(feinfo.name[.. len + 1].as_ptr()) };
@@ -165,7 +165,7 @@ impl FeDevice {
             DtvProperty::new(DTV_API_VERSION, 0),
             DtvProperty::new(DTV_ENUM_DELSYS, 0),
         ];
-        self.get_properties(&mut cmdseq).context("frontend get api version (deprecated driver)")?;
+        self.get_properties(&mut cmdseq).context("FE: get api version (deprecated driver)")?;
 
         // DVB API Version
 
@@ -181,7 +181,7 @@ impl FeDevice {
 
         // dev-file metadata
 
-        let metadata = self.file.metadata().context("frontend get device metadata")?;
+        let metadata = self.file.metadata().context("FE: get device metadata")?;
 
         ensure!(
             metadata.file_type().is_char_device(),
@@ -197,7 +197,7 @@ impl FeDevice {
             .write(w)
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(path)
-            .context("fe open")?;
+            .context("FE: open")?;
 
         let mut fe = FeDevice {
             file,
@@ -292,7 +292,7 @@ impl FeDevice {
 
     /// Sets properties on frontend device
     pub fn set_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
-        self.check_properties(cmdseq).context("fe property check")?;
+        self.check_properties(cmdseq).context("FE: property check")?;
 
         #[repr(C)]
         pub struct DtvProperties {
@@ -309,7 +309,7 @@ impl FeDevice {
         ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }.context("frontend set properties")?;
+        }.context("FE: set properties")?;
 
         Ok(())
     }
@@ -331,7 +331,7 @@ impl FeDevice {
         ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut cmd as *mut _)
-        }.context("frontend get properties")?;
+        }.context("FE: get properties")?;
 
         Ok(())
     }
@@ -343,7 +343,7 @@ impl FeDevice {
 
         unsafe {
             ioctl_call(self.as_raw_fd(), event as *mut _)
-        }.context("frontend get event")?;
+        }.context("FE: get event")?;
 
         Ok(())
     }
@@ -360,7 +360,7 @@ impl FeDevice {
 
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
-        }.context("frontend set tone")?;
+        }.context("FE: set tone")?;
 
         Ok(())
     }
@@ -389,7 +389,7 @@ impl FeDevice {
 
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
-        }.context("frontend set voltage")?;
+        }.context("FE: set voltage")?;
 
         Ok(())
     }
@@ -423,7 +423,7 @@ impl FeDevice {
         ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }.context("frontend diseqc master cmd")?;
+        }.context("FE: diseqc master cmd")?;
 
         Ok(())
     }

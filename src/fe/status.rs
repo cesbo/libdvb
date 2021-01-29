@@ -104,15 +104,15 @@ impl fmt::Display for FeStatus {
         }
 
         write!(f, " BER:")?;
-        if let Some(ber) = self.props[2].get_stats_counter() {
-            write!(f, "{}", ber & 0xFFFF)?;
+        if let Some(ber) = self.get_ber() {
+            write!(f, "{}", ber)?;
         } else {
             write!(f, "-")?;
         }
 
         write!(f, " UNC:")?;
-        if let Some(unc) = self.props[3].get_stats_counter() {
-            write!(f, "{}", unc & 0xFFFF)?;
+        if let Some(unc) = self.get_unc() {
+            write!(f, "{}", unc)?;
         } else {
             write!(f, "-")?;
         }
@@ -124,6 +124,8 @@ impl fmt::Display for FeStatus {
 
 impl FeStatus {
     fn get_signal_level(&self) -> Option<(f64, u64)> {
+        let stats = self.props.get(0)?;
+        let _stats = unsafe { &stats.u.st };
         // TODO: config for lo/hi
         // let lo: f64 = -85.0;
         // let hi: f64 = -6.0;
@@ -132,9 +134,31 @@ impl FeStatus {
     }
 
     fn get_signal_noise_ratio(&self) -> Option<(f64, u64)> {
+        let stats = self.props.get(1)?;
+        let _stats = unsafe { &stats.u.st };
         // let relative = 5 * decibel as u32;
         None
     }
+
+    fn get_stats_counter(&self, u: usize) -> Option<u32> {
+        let stats = self.props.get(u)?;
+        let stats = unsafe { &stats.u.st };
+        if stats.len > 0 {
+            let s = &stats.stat[0];
+            if s.scale == FE_SCALE_COUNTER {
+                return Some((s.value & 0xFFFF) as u32);
+            }
+        }
+        None
+    }
+
+    /// Returns BER value if available
+    #[inline]
+    pub fn get_ber(&self) -> Option<u32> { self.get_stats_counter(2) }
+
+    /// Returns UNC value if available
+    #[inline]
+    pub fn get_unc(&self) -> Option<u32> { self.get_stats_counter(3) }
 
     /// Reads frontend status
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
@@ -144,7 +168,7 @@ impl FeStatus {
         ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
         unsafe {
             ioctl_call(fe.as_raw_fd(), &mut self.status as *mut _)
-        }.context("frontend read status")?;
+        }.context("FE: read status")?;
 
         if self.status == FE_NONE {
             return Ok(());

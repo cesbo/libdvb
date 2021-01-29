@@ -454,7 +454,7 @@ impl fmt::Debug for DtvStats {
             }
             FE_SCALE_RELATIVE => {
                 s.field(FIELD_SCALE, &"FE_SCALE_RELATIVE");
-                s.field(FIELD_VALUE, &{(self.value as u64) * 100 / 65535});
+                s.field(FIELD_VALUE, &{self.value as u64});
             }
             FE_SCALE_COUNTER => {
                 s.field(FIELD_SCALE, &"FE_SCALE_COUNTER");
@@ -728,29 +728,6 @@ impl DtvProperty {
             u: DtvPropertyData { data },
             result: 0,
         }
-    }
-
-    pub fn get_stats_counter(&self) -> Option<u64> {
-        match self.cmd {
-            DTV_STAT_PRE_ERROR_BIT_COUNT |
-            DTV_STAT_PRE_TOTAL_BIT_COUNT |
-            DTV_STAT_POST_ERROR_BIT_COUNT |
-            DTV_STAT_POST_TOTAL_BIT_COUNT |
-            DTV_STAT_ERROR_BLOCK_COUNT |
-            DTV_STAT_TOTAL_BLOCK_COUNT => {
-                let stats = unsafe { &self.u.st };
-                if stats.len > 0 {
-                    let s = &stats.stat[0];
-                    if s.scale == FE_SCALE_COUNTER {
-                        return Some(s.value as u64);
-                    }
-                }
-            }
-
-            _ => {}
-        }
-
-        None
     }
 }
 

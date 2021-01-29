@@ -53,5 +53,5 @@ Frontend status:
 let fe = FeDevice::open_rd("/dev/dvb/adapter0/frontend0")?;
 let mut status = FeStatus::default();
 status.read(&fe)?;
-println!("{}", &status.display(1));
+println!("{}", &status);
 ```
