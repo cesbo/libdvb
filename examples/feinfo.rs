@@ -25,8 +25,6 @@ fn check_frontend(path: &Path) -> Result<()> {
     status.read(&fe)?;
     println!("{}", &status);
 
-    dbg!(&status);
-
     Ok(())
 }
 

@@ -110,7 +110,7 @@ impl CaDevice {
         Ok(())
     }
 
-    pub fn new(path: &Path, slot_id: u8) -> Result<CaDevice> {
+    pub fn open(path: &Path, slot_id: u8) -> Result<CaDevice> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
