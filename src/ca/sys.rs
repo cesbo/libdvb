@@ -127,7 +127,6 @@ pub struct CaPid {
 }
 
 
-// pub const CA_GET_SLOT_INFO: IoctlInt = io_read::<CaSlotInfo>(b'o', 130);
 // pub const CA_GET_DESCR_INFO: IoctlInt = io_read::<CaDescrInfo>(b'o', 131);
 // pub const CA_GET_MSG: IoctlInt = io_read::<CaMsg>(b'o', 132);
 // pub const CA_SEND_MSG: IoctlInt = io_write::<CaMsg>(b'o', 133);

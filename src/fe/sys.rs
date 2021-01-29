@@ -439,13 +439,31 @@ pub struct DtvStats {
 impl fmt::Debug for DtvStats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut s = f.debug_struct("DtvStats");
-        s.field("scale", &{self.scale});
+
+        const FIELD_SCALE: &str = "scale";
+        const FIELD_VALUE: &str = "value";
+
         match self.scale {
-            FE_SCALE_NOT_AVAILABLE => s.field("value", &"not available"),
-            FE_SCALE_DECIBEL => s.field("value", &{self.value}),
-            FE_SCALE_RELATIVE => s.field("value", &{self.value as u64}),
-            FE_SCALE_COUNTER => s.field("value", &{self.value as u64}),
-            _ => s.field("value", &"invalid scale format"),
+            FE_SCALE_NOT_AVAILABLE => {
+                s.field(FIELD_SCALE, &"FE_SCALE_NOT_AVAILABLE");
+                s.field(FIELD_VALUE, &"not available");
+            }
+            FE_SCALE_DECIBEL => {
+                s.field(FIELD_SCALE, &"FE_SCALE_DECIBEL");
+                s.field(FIELD_VALUE, &{(self.value as f64) / 1000.0});
+            }
+            FE_SCALE_RELATIVE => {
+                s.field(FIELD_SCALE, &"FE_SCALE_RELATIVE");
+                s.field(FIELD_VALUE, &{self.value as u64});
+            }
+            FE_SCALE_COUNTER => {
+                s.field(FIELD_SCALE, &"FE_SCALE_COUNTER");
+                s.field(FIELD_VALUE, &{self.value as u64});
+            }
+            _ => {
+                s.field(FIELD_SCALE, &{self.scale});
+                s.field(FIELD_VALUE, &"invalid scale format");
+            }
         };
         s.finish()
     }
@@ -457,10 +475,18 @@ pub const MAX_DTV_STATS: usize = 4;
 
 /// Store Digital TV frontend statistics
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct DtvFrontendStats {
     pub len: u8,
     pub stat: [DtvStats; MAX_DTV_STATS],
+}
+
+
+impl fmt::Debug for DtvFrontendStats {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let stats = &self.stat[0 .. self.len as usize];
+        f.debug_list().entries(stats.iter()).finish()
+    }
 }
 
 
@@ -625,41 +651,72 @@ pub struct DtvProperty {
 impl fmt::Debug for DtvProperty {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut s = f.debug_struct("DtvProperty");
-        s.field("cmd", &{ self.cmd });
 
-        const FNAME: &str = "value";
+        const FIELD_CMD: &str = "cmd";
+        const FIELD_DATA: &str = "data";
+        const FIELD_STATS: &str = "stats";
 
         match self.cmd {
             DTV_FREQUENCY => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_FREQUENCY");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_MODULATION => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_MODULATION");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_BANDWIDTH_HZ => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_BANDWIDTH_HZ");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_INVERSION => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_INVERSION");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
-            DTV_SYMBOL_RATE => {
-                s.field(FNAME, unsafe { &self.u.data });
+            DTV_SYMBOL_RATE  => {
+                s.field(FIELD_CMD, &"DTV_SYMBOL_RATE");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_INNER_FEC => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_INNER_FEC");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_PILOT => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_PILOT");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_ROLLOFF => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_ROLLOFF");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_DELIVERY_SYSTEM => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_DELIVERY_SYSTEM");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
             DTV_API_VERSION => {
-                s.field(FNAME, unsafe { &self.u.data });
+                s.field(FIELD_CMD, &"DTV_API_VERSION");
+                s.field(FIELD_DATA, unsafe { &self.u.data });
             }
+
+            /* Quality parameters */
+
+            DTV_STAT_SIGNAL_STRENGTH => {
+                s.field(FIELD_CMD, &"DTV_STAT_SIGNAL_STRENGTH");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_CNR => {
+                s.field(FIELD_CMD, &"DTV_STAT_CNR");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_PRE_ERROR_BIT_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_PRE_ERROR_BIT_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+            DTV_STAT_ERROR_BLOCK_COUNT => {
+                s.field(FIELD_CMD, &"DTV_STAT_ERROR_BLOCK_COUNT");
+                s.field(FIELD_STATS, unsafe { &self.u.st });
+            }
+
             // TODO: more values
             _ => {}
         }
