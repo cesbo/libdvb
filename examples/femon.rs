@@ -28,7 +28,7 @@ pub fn start(fepath: &str) -> Result<()> {
 
     loop {
         status.read(&fe)?;
-        println!("{}", &status.display(0));
+        println!("{}", &status);
         thread::sleep(delay);
     }
 }

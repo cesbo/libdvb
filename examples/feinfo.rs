@@ -23,7 +23,9 @@ fn check_frontend(path: &Path) -> Result<()> {
 
     let mut status = FeStatus::default();
     status.read(&fe)?;
-    println!("{}", &status.display(1));
+    println!("{}", &status);
+
+    dbg!(&status);
 
     Ok(())
 }

@@ -42,10 +42,7 @@ use {
 
 
 pub use {
-    status::{
-        FeStatus,
-        FeStatusDisplay,
-    },
+    status::FeStatus,
 };
 
 
