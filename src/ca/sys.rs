@@ -14,15 +14,15 @@ pub use {
 
 mod ca_slot_type {
     /// CI high level interface
-    pub const CA_CI: i32        = 1;
+    pub const CA_CI: u32        = 1;
     /// CI link layer level interface
-    pub const CA_CI_LINK: i32   = 2;
+    pub const CA_CI_LINK: u32   = 2;
     /// CI physical layer level interface
-    pub const CA_CI_PHYS: i32   = 4;
+    pub const CA_CI_PHYS: u32   = 4;
     /// built-in descrambler
-    pub const CA_DESCR: i32     = 8;
+    pub const CA_DESCR: u32     = 8;
     /// simple smart card interface
-    pub const CA_SC: i32        = 128;
+    pub const CA_SC: u32        = 128;
 }
 
 
@@ -37,12 +37,12 @@ mod ca_slot_flags {
 
 /// CA slot interface types and info
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CaSlotInfo {
     /// slot number
-    pub num: i32,
+    pub slot_num: u32,
     /// slot type - ca_slot_type
-    pub typ: i32,
+    pub slot_type: u32,
     /// flags applicable to the slot - ca_slot_flags
     pub flags: u32,
 }
@@ -60,18 +60,18 @@ mod ca_descr_type {
 
 /// descrambler types and info
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CaDescrInfo {
     /// number of available descramblers (keys)
-    pub num: u32,
+    pub descr_num: u32,
     /// type of supported scrambling system - ca_descr_type
-    pub typ: u32,
+    pub descr_type: u32,
 }
 
 
 /// CA slot interface capabilities
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CaCaps {
     /// total number of CA card and module slots
     pub slot_num: u32,
@@ -86,7 +86,7 @@ pub struct CaCaps {
 
 /// a message to/from a CI-CAM
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct CaMsg {
     /// unused
     index: u32,
@@ -107,7 +107,7 @@ impl Default for CaMsg {
 
 /// CA descrambler control words info
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CaDescr {
     /// CA Descrambler slot
     pub index: u32,
@@ -119,7 +119,7 @@ pub struct CaDescr {
 
 
 #[repr(C)]
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug)]
 pub struct CaPid {
     pub pid: u32,
     /// -1 == disable

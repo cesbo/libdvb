@@ -27,6 +27,7 @@ use {
     super::{
         asn1,
         CaDevice,
+        spdu,
     },
 };
 
@@ -55,8 +56,50 @@ mod ca_tpdu_tag {
 }
 
 
+pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
+    // TODO: read packet
+
+    if data.len() < 4 {
+        return Err(anyhow!("CA TPDU: invalid packet size"));
+    }
+
+    if data[1] == 0 /* TODO: || data[1] > ca.slots.len() */ {
+        return Err(anyhow!("CA TPDU: invalid slot id {}", data[1]));
+    }
+
+    let slot_id = data[1] - 1;
+    let tag = data[2];
+
+    match tag {
+        /* Create Transport Connection reply */
+        TT_CTC_REPLY => {
+            // TODO: slot is active now
+        }
+        /* Delete Transport Connection reply */
+        TT_DTC_REPLY => {
+            //
+        }
+
+        TT_DATA_MORE => {
+            // TODO: save data to buffer
+        }
+        TT_DATA_LAST => {
+            // TODO: save data to buffer
+            spdu::handle(ca, slot_id, &[])?;
+        }
+
+        TT_SB => {}
+        _ => {
+            return Err(anyhow!("CA TPDU: invalid tag 0x{:02X}", tag));
+        }
+    }
+
+    Ok(())
+}
+
+
 /// Writes TPDU to the CA device
-pub fn send(ca: &CaDevice, tag: u8, data: &[u8]) -> Result<()> {
+pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
     if data.len() >= TPDU_SIZE_MAX {
         return Err(anyhow!("CA TPDU: packet is to large"));
     }
@@ -64,10 +107,10 @@ pub fn send(ca: &CaDevice, tag: u8, data: &[u8]) -> Result<()> {
     // TODO: queue and send messages only if module ready
     // TODO: timeout
 
-    let t_c_id = ca.get_slot_id() + 1;
+    let t_c_id = slot_id + 1;
 
     let mut header: Vec<u8> = Vec::with_capacity(8);
-    header.push(ca.get_slot_id());
+    header.push(slot_id);
     header.push(t_c_id);
     header.push(tag);
 
@@ -88,6 +131,6 @@ pub fn send(ca: &CaDevice, tag: u8, data: &[u8]) -> Result<()> {
 
 
 /// Init transport layer for slot
-pub fn init(ca: &CaDevice) -> Result<()> {
-    send(ca, TT_CREATE_TC, &[])
+pub fn init(ca: &CaDevice, slot_id: u8) -> Result<()> {
+    send(ca, slot_id, TT_CREATE_TC, &[])
 }

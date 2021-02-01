@@ -59,13 +59,13 @@ fn assert_size(spdu: &[u8], size: usize) -> Result<()> {
 }
 
 
-fn handle_session_number(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+fn handle_session_number(ca: &mut CaDevice, _slot_id: u8, spdu: &[u8]) -> Result<()> {
     let session_id = u16::from_be_bytes(spdu[2 ..= 3].try_into().unwrap());
     apdu::handle(ca, session_id, &spdu[SPDU_HEADER_SIZE ..])
 }
 
 
-fn handle_open_session_request(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+fn handle_open_session_request(ca: &mut CaDevice, slot_id: u8, spdu: &[u8]) -> Result<()> {
     assert_size(spdu, 6)?;
 
     let resource_id = u32::from_be_bytes(spdu[2 ..= 5].try_into().unwrap());
@@ -83,11 +83,11 @@ fn handle_open_session_request(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
         session_id as u8
     ];
 
-    tpdu::send(ca, tpdu::TT_DATA_LAST, &response)
+    tpdu::send(ca, slot_id, tpdu::TT_DATA_LAST, &response)
 }
 
 
-fn handle_close_session_request(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+fn handle_close_session_request(ca: &mut CaDevice, slot_id: u8, spdu: &[u8]) -> Result<()> {
     assert_size(spdu, 4)?;
 
     let session_id = u16::from_be_bytes(spdu[2 ..= 3].try_into().unwrap());
@@ -101,11 +101,11 @@ fn handle_close_session_request(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
         spdu[3]
     ];
 
-    tpdu::send(ca, tpdu::TT_DATA_LAST, &response)
+    tpdu::send(ca, slot_id, tpdu::TT_DATA_LAST, &response)
 }
 
 
-fn handle_create_session_response(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+fn handle_create_session_response(ca: &mut CaDevice, _slot_id: u8, spdu: &[u8]) -> Result<()> {
     assert_size(spdu, 9)?;
 
     let session_id = u16::from_be_bytes(spdu[7 ..= 8].try_into().unwrap());
@@ -119,7 +119,7 @@ fn handle_create_session_response(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> 
 }
 
 
-fn handle_close_session_response(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+fn handle_close_session_response(ca: &mut CaDevice, _slot_id: u8, spdu: &[u8]) -> Result<()> {
     assert_size(spdu, 5)?;
 
     let session_id = u16::from_be_bytes(spdu[3 ..= 4].try_into().unwrap());
@@ -129,30 +129,30 @@ fn handle_close_session_response(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
 
 
 /// Process received message depends of it tag
-pub fn handle(ca: &mut CaDevice, spdu: &[u8]) -> Result<()> {
+pub fn handle(ca: &mut CaDevice, slot_id: u8, spdu: &[u8]) -> Result<()> {
     if spdu.len() < SPDU_HEADER_SIZE {
         return Err(anyhow!("CA SPDU: message is too short"));
     }
 
     match spdu[0] {
         ST_SESSION_NUMBER => {
-            handle_session_number(ca, spdu)
+            handle_session_number(ca, slot_id, spdu)
                 .context("ST_SESSION_NUMBER failed")
         }
         ST_OPEN_SESSION_REQUEST => {
-            handle_open_session_request(ca, spdu)
+            handle_open_session_request(ca, slot_id, spdu)
                 .context("ST_OPEN_SESSION_REQUEST failed")
         }
         ST_CLOSE_SESSION_REQUEST => {
-            handle_close_session_request(ca, spdu)
+            handle_close_session_request(ca, slot_id, spdu)
                 .context("ST_CLOSE_SESSION_REQUEST failed")
         }
         ST_CREATE_SESSION_RESPONSE => {
-            handle_create_session_response(ca, spdu)
+            handle_create_session_response(ca, slot_id, spdu)
                 .context("ST_CREATE_SESSION_RESPONSE failed")
         }
         ST_CLOSE_SESSION_RESPONSE => {
-            handle_close_session_response(ca, spdu)
+            handle_close_session_response(ca, slot_id, spdu)
                 .context("ST_CLOSE_SESSION_RESPONSE failed")
         }
         tag => Err(anyhow!("CA SPDU: invalid tag 0x{:02X}", tag)),

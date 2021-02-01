@@ -17,7 +17,7 @@ use {
 fn check_ca(path: &Path) -> Result<()> {
     println!("CA: {}", path.display());
 
-    let ca = CaDevice::open(path, 0)?;
+    let ca = CaDevice::open(path)?;
 
     Ok(())
 }
