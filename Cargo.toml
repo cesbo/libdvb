@@ -14,4 +14,3 @@ edition = "2018"
 [dependencies]
 nix = "0.19"
 anyhow = "1.0"
-thiserror = "1.0"

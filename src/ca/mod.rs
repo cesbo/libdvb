@@ -42,8 +42,7 @@ use {
 #[derive(Debug)]
 pub struct CaDevice {
     file: File,
-
-    slot_id: u8
+    slot_id: u8,
 }
 
 
@@ -99,8 +98,7 @@ impl CaDevice {
         }.context("CA: failed to get slot info")?;
 
         if slot_info.flags == CA_CI_MODULE_NOT_FOUND {
-            println!("CA: module not found");
-            return Ok(());
+            return Err(anyhow!("CA: module not found"));
         }
 
         if slot_info.typ != CA_CI_LINK {

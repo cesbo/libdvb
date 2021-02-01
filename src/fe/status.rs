@@ -81,7 +81,7 @@ impl fmt::Display for FeStatus {
             return Ok(());
         }
 
-        write!(f, " S:")?;
+        write!(f, " Signal:")?;
         if let Some(s) = self.get_signal_level() {
             // TODO: config for lo/hi
             let lo: f64 = -85.0;
@@ -96,10 +96,9 @@ impl fmt::Display for FeStatus {
             return Ok(());
         }
 
-        write!(f, " Q:")?;
+        write!(f, " Quality:")?;
         if let Some(q) = self.get_signal_noise_ratio() {
-            let relative = q * 2.;
-            write!(f, "{:.02}dB ({:.0}%)", q, relative)?;
+            write!(f, "{:.02}dB", q)?;
         } else {
             write!(f, "-")?;
         }

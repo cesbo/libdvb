@@ -28,7 +28,6 @@ use {
         Context,
         Result,
     },
-    thiserror::Error,
 
     nix::{
         ioctl_read,
@@ -44,30 +43,6 @@ use {
 pub use {
     status::FeStatus,
 };
-
-
-/// The error type for frontend operations
-#[derive(Debug, Error)]
-pub enum FeError {
-    #[error("frontend is not char device")]
-    InvalidDeviceFormat,
-    #[error("frequency out of range")]
-    InvalidFrequency,
-    #[error("symbolrate out of range")]
-    InvalidSymbolrate,
-    #[error("unknown subsystem")]
-    InvalidSubsystem,
-    #[error("no auto inversion")]
-    NoAutoInversion,
-    #[error("no auto transmission mode")]
-    NoAutoTransmitMode,
-    #[error("no auto guard interval")]
-    NoAutoGuardInterval,
-    #[error("no auto hierarchy")]
-    NoAutoHierarchy,
-    #[error("multistream not supported")]
-    NoMultistream,
-}
 
 
 /// A reference to the frontend device and device information
@@ -185,7 +160,7 @@ impl FeDevice {
 
         ensure!(
             metadata.file_type().is_char_device(),
-            FeError::InvalidDeviceFormat
+            "FE: path is not to char device"
         );
 
         Ok(())
@@ -231,14 +206,14 @@ impl FeDevice {
                     let v = unsafe { p.u.data };
                     ensure!(
                         self.frequency_range.contains(&v),
-                        FeError::InvalidFrequency
+                        "FE: frequency out of range"
                     );
                 }
                 DTV_SYMBOL_RATE => {
                     let v = unsafe { p.u.data };
                     ensure!(
                         self.symbolrate_range.contains(&v),
-                        FeError::InvalidSymbolrate
+                        "FE: symbolrate out of range"
                     );
                 }
                 DTV_INVERSION => {
@@ -246,7 +221,7 @@ impl FeDevice {
                     if v == INVERSION_AUTO {
                         ensure!(
                             self.caps & FE_CAN_INVERSION_AUTO != 0,
-                            FeError::NoAutoInversion
+                            "FE: auto inversion is not available"
                         );
                     }
                 }
@@ -255,7 +230,7 @@ impl FeDevice {
                     if v == TRANSMISSION_MODE_AUTO {
                         ensure!(
                             self.caps & FE_CAN_TRANSMISSION_MODE_AUTO != 0,
-                            FeError::NoAutoTransmitMode
+                            "FE: no auto transmission mode"
                         );
                     }
                 }
@@ -264,7 +239,7 @@ impl FeDevice {
                     if v == GUARD_INTERVAL_AUTO {
                         ensure!(
                             self.caps & FE_CAN_GUARD_INTERVAL_AUTO != 0,
-                            FeError::NoAutoGuardInterval
+                            "FE: no auto guard interval"
                         );
                     }
                 }
@@ -273,14 +248,14 @@ impl FeDevice {
                     if v == HIERARCHY_AUTO {
                         ensure!(
                             self.caps & FE_CAN_HIERARCHY_AUTO != 0,
-                            FeError::NoAutoHierarchy
+                            "FE: no auto hierarchy"
                         );
                     }
                 }
                 DTV_STREAM_ID => {
                     ensure!(
                         self.caps & FE_CAN_MULTISTREAM != 0,
-                        FeError::NoMultistream
+                        "FE: no multistream"
                     );
                 }
                 _ => {}
