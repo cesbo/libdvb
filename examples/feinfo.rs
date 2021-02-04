@@ -23,7 +23,7 @@ fn check_frontend(path: &Path) -> Result<()> {
 
     let mut status = FeStatus::default();
     status.read(&fe)?;
-    println!("{}", &status);
+    println!("Status: {}", &status);
 
     Ok(())
 }

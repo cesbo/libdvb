@@ -315,12 +315,84 @@ impl FeDevice {
     pub fn get_event(&self, event: &mut FeEvent) -> Result<()> {
         // FE_GET_EVENT
         ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
-
         unsafe {
             ioctl_call(self.as_raw_fd(), event as *mut _)
         }.context("FE: get event")?;
 
         Ok(())
+    }
+
+    /// Returns frontend status
+    /// - [`FE_NONE`]
+    /// - [`FE_HAS_SIGNAL`]
+    /// - [`FE_HAS_CARRIER`]
+    /// - [`FE_HAS_VITERBI`]
+    /// - [`FE_HAS_SYNC`]
+    /// - [`FE_HAS_LOCK`]
+    /// - [`FE_TIMEDOUT`]
+    /// - [`FE_REINIT`]
+    pub fn read_status(&self) -> Result<u32> {
+        let mut result: u32 = FE_NONE;
+
+        // FE_READ_STATUS
+        ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
+        unsafe {
+            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
+        }.context("FE: read status")?;
+
+        Ok(result)
+    }
+
+    /// Reads and returns a signal strength relative value (DVBv3 API)
+    pub fn read_signal_strength(&self) -> Result<u16> {
+        let mut result: u16 = 0;
+
+        // FE_READ_SIGNAL_STRENGTH
+        ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
+        unsafe {
+            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
+        }.context("FE: read signal strength")?;
+
+        Ok(result)
+    }
+
+    /// Reads and returns a signal-to-noise ratio, relative value (DVBv3 API)
+    pub fn read_snr(&self) -> Result<u16> {
+        let mut result: u16 = 0;
+
+        // FE_READ_SNR
+        ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
+        unsafe {
+            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
+        }.context("FE: read snr")?;
+
+        Ok(result)
+    }
+
+    /// Reads and returns a bit error counter (DVBv3 API)
+    pub fn read_ber(&self) -> Result<u32> {
+        let mut result: u32 = 0;
+
+        // FE_READ_BER
+        ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
+        unsafe {
+            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
+        }.context("FE: read ber")?;
+
+        Ok(result)
+    }
+
+    /// Reads and returns an uncorrected blocks counter (DVBv3 API)
+    pub fn read_unc(&self) -> Result<u32> {
+        let mut result: u32 = 0;
+
+        // FE_READ_UNCORRECTED_BLOCKS
+        ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
+        unsafe {
+            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
+        }.context("FE: read uncorrected blocks")?;
+
+        Ok(result)
     }
 
     /// Turns on/off generation of the continuous 22kHz tone
