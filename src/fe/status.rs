@@ -23,23 +23,31 @@ pub struct FeStatus {
 }
 
 
+const IDX_DELIVERY_SYSTEM: usize = 0;
+const IDX_MODULATION: usize = 1;
+const IDX_SIGNAL_STRENGTH: usize = 2;
+const IDX_SNR: usize = 3;
+const IDX_BER: usize = 4;
+const IDX_UNC: usize = 5;
+
+
 impl Default for FeStatus {
     fn default() -> FeStatus {
         FeStatus {
             status: 0,
             props: [
-                // 0: delivery system
+                // delivery system
                 DtvProperty::new(DTV_DELIVERY_SYSTEM, FE_NONE),
-                // 1: signal level
-                DtvProperty::new(DTV_STAT_SIGNAL_STRENGTH, 0),
-                // 2: signal-to-noise ratio
-                DtvProperty::new(DTV_STAT_CNR, 0),
-                // 3: ber - number of bit errors
-                DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
-                // 4: unc - number of block errors
-                DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
-                // 5: modulation
+                // modulation
                 DtvProperty::new(DTV_MODULATION, QPSK),
+                // signal level
+                DtvProperty::new(DTV_STAT_SIGNAL_STRENGTH, 0),
+                // signal-to-noise ratio
+                DtvProperty::new(DTV_STAT_CNR, 0),
+                // ber - number of bit errors
+                DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
+                // unc - number of block errors
+                DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
             ],
         }
     }
@@ -136,15 +144,15 @@ impl fmt::Display for FeStatus {
 impl FeStatus {
     /// Returns current delivery system
     #[inline]
-    pub fn get_delivery_system(&self) -> u32 { unsafe { self.props[0].u.data } }
+    pub fn get_delivery_system(&self) -> u32 { unsafe { self.props[IDX_DELIVERY_SYSTEM].u.data } }
 
     /// Returns current modulation
     #[inline]
-    pub fn get_modulation(&self) -> u32 { unsafe { self.props[5].u.data } }
+    pub fn get_modulation(&self) -> u32 { unsafe { self.props[IDX_MODULATION].u.data } }
 
     /// Returns Signal Strength in dBm
     pub fn get_signal_strength_decibel(&self) -> Option<f64> {
-        let stat = unsafe { &self.props[1].u.st.stat[0] };
+        let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[0] };
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
         } else {
@@ -154,7 +162,7 @@ impl FeStatus {
 
     /// Returns Signal Strength in percentage
     pub fn get_signal_strength(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[1].u.st.stat[1] };
+        let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[1] };
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
         } else {
@@ -164,7 +172,7 @@ impl FeStatus {
 
     /// Returns Signal to noise ratio in dB
     pub fn get_snr_decibel(&self) -> Option<f64> {
-        let stat = unsafe { &self.props[2].u.st.stat[0] };
+        let stat = unsafe { &self.props[IDX_SNR].u.st.stat[0] };
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
         } else {
@@ -174,7 +182,7 @@ impl FeStatus {
 
     /// Returns Signal Strength in percentage
     pub fn get_snr(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[2].u.st.stat[1] };
+        let stat = unsafe { &self.props[IDX_SNR].u.st.stat[1] };
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
         } else {
@@ -184,9 +192,9 @@ impl FeStatus {
 
     /// Returns BER value if available
     pub fn get_ber(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[3].u.st.stat[0] };
+        let stat = unsafe { &self.props[IDX_BER].u.st.stat[0] };
         if stat.scale == FE_SCALE_COUNTER {
-            Some((stat.value & 0xFFFF) as u32)
+            Some((stat.value & 0xFFFF_FFFF) as u32)
         } else {
             None
         }
@@ -194,16 +202,16 @@ impl FeStatus {
 
     /// Returns UNC value if available
     pub fn get_unc(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[4].u.st.stat[0] };
+        let stat = unsafe { &self.props[IDX_UNC].u.st.stat[0] };
         if stat.scale == FE_SCALE_COUNTER {
-            Some((stat.value & 0xFFFF) as u32)
+            Some((stat.value & 0xFFFF_FFFF) as u32)
         } else {
             None
         }
     }
 
     fn normalize_signal_strength(&mut self, fe: &FeDevice) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[1].u.st };
+        let mut stats = unsafe { &mut self.props[IDX_SIGNAL_STRENGTH].u.st };
 
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
@@ -251,7 +259,7 @@ impl FeStatus {
         let delivery_system = self.get_delivery_system();
         let modulation = self.get_modulation();
 
-        let mut stats = unsafe { &mut self.props[2].u.st };
+        let mut stats = unsafe { &mut self.props[IDX_SNR].u.st };
 
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
@@ -275,7 +283,7 @@ impl FeStatus {
             stats.stat[1].scale = FE_SCALE_RELATIVE;
             stats.stat[1].value = i64::from(value);
         } else if stats.stat[0].scale == FE_SCALE_DECIBEL {
-            let maxdb = match delivery_system {
+            let hi = match delivery_system {
                 SYS_DVBS |
                 SYS_DVBS2 => 15000,
 
@@ -294,57 +302,61 @@ impl FeStatus {
                     }
                 }
 
-                _ => 0
+                _ => return Ok(()),
             };
 
-            if maxdb != 0 {
-                stats.stat[1].scale = FE_SCALE_RELATIVE;
-                stats.stat[1].value = {
-                    if stats.stat[0].value >= maxdb {
-                        65535
-                    } else if stats.stat[0].value <= 0 {
-                        0
-                    } else {
-                        65535 * stats.stat[0].value / maxdb
-                    }
-                };
-            }
+            stats.stat[1].scale = FE_SCALE_RELATIVE;
+            stats.stat[1].value = {
+                if stats.stat[0].value >= hi {
+                    65535
+                } else if stats.stat[0].value <= 0 {
+                    0
+                } else {
+                    65535 * stats.stat[0].value / hi
+                }
+            };
         }
 
         Ok(())
     }
 
     fn normalize_ber(&mut self, fe: &FeDevice) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[3].u.st };
+        let mut stats = unsafe { &mut self.props[IDX_BER].u.st };
 
-        if stats.len == 0 || stats.stat[0].scale != FE_SCALE_COUNTER {
-            if let Ok(value) = fe.read_ber() {
-                stats.stat[0].scale = FE_SCALE_COUNTER;
-                stats.stat[0].value = i64::from(value);
-            } else {
-                stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
-                stats.stat[0].value = 0;
-            }
-
+        if stats.len == 0 {
+            stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+            stats.stat[0].value = 0;
             stats.len = 1;
+        }
+
+        if stats.stat[0].scale == FE_SCALE_COUNTER || (self.status & FE_HAS_LOCK) == 0 {
+            return Ok(())
+        }
+
+        if let Ok(value) = fe.read_ber() {
+            stats.stat[0].scale = FE_SCALE_COUNTER;
+            stats.stat[0].value = i64::from(value);
         }
 
         Ok(())
     }
 
     fn normalize_unc(&mut self, fe: &FeDevice) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[4].u.st };
+        let mut stats = unsafe { &mut self.props[IDX_UNC].u.st };
 
-        if stats.len == 0 || stats.stat[0].scale != FE_SCALE_COUNTER {
-            if let Ok(value) = fe.read_unc() {
-                stats.stat[0].scale = FE_SCALE_COUNTER;
-                stats.stat[0].value = i64::from(value);
-            } else {
-                stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
-                stats.stat[0].value = 0;
-            }
-
+        if stats.len == 0 {
+            stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+            stats.stat[0].value = 0;
             stats.len = 1;
+        }
+
+        if stats.stat[0].scale == FE_SCALE_COUNTER || (self.status & FE_HAS_LOCK) == 0 {
+            return Ok(())
+        }
+
+        if let Ok(value) = fe.read_unc() {
+            stats.stat[0].scale = FE_SCALE_COUNTER;
+            stats.stat[0].value = i64::from(value);
         }
 
         Ok(())
