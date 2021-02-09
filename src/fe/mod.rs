@@ -447,7 +447,7 @@ impl FeDevice {
     ///
     /// Example DiSEqC commited command:
     ///
-    /// ```
+    /// ```text
     /// [0xE0, 0x10, 0x38, 0xF0 | value]
     /// ```
     ///

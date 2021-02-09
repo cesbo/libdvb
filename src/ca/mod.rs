@@ -39,11 +39,13 @@ use {
 };
 
 
+const CA_DELAY: Duration = Duration::from_millis(100);
+
+
 #[derive(Debug)]
 pub struct CaDevice {
     file: File,
-
-    // TODO: slots vec
+    slot: CaSlotInfo,
 }
 
 
@@ -54,6 +56,7 @@ impl AsRawFd for CaDevice {
 
 
 impl CaDevice {
+    /// Sends reset command to CA device
     #[inline]
     pub fn reset(&mut self) -> Result<()> {
         // CA_RESET
@@ -65,6 +68,7 @@ impl CaDevice {
         Ok(())
     }
 
+    /// Gets CA capabilities
     #[inline]
     pub fn get_caps(&self, caps: &mut CaCaps) -> Result<()> {
         // CA_GET_CAP
@@ -77,37 +81,19 @@ impl CaDevice {
     }
 
     /// Gets CA slot information
-    ///
-    /// If slot is available but not ready returns `false`
-    /// If slot is ready returns `true`
-    pub fn get_slot_info(&self, slot_info: &mut CaSlotInfo) -> Result<bool> {
+    #[inline]
+    pub fn get_slot_info(&mut self) -> Result<()> {
         // CA_GET_SLOT_INFO
         ioctl_read!(#[inline] ca_get_slot_info, b'o', 130, CaSlotInfo);
         unsafe {
-            ca_get_slot_info(self.as_raw_fd(), slot_info as *mut _)
+            ca_get_slot_info(self.as_raw_fd(), &mut self.slot as *mut _)
         }.context("CA: failed to get slot info")?;
 
-        if slot_info.slot_type != CA_CI_LINK {
-            return Err(anyhow!("CA: incompatible interface"));
-        }
-
-        match slot_info.flags {
-            CA_CI_MODULE_PRESENT => {
-                Ok(false)
-            }
-            CA_CI_MODULE_READY => {
-                Ok(true)
-            }
-            CA_CI_MODULE_NOT_FOUND => {
-                Err(anyhow!("CA: module not found"))
-            }
-            _ => {
-                Err(anyhow!("CA: invalid slot flags"))
-            }
-        }
+        Ok(())
     }
 
-    pub fn open(path: &Path) -> Result<CaDevice> {
+    /// Attempts to open a CA device
+    pub fn open(path: &Path, slot: u32) -> Result<CaDevice> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -117,14 +103,12 @@ impl CaDevice {
 
         let mut ca = CaDevice {
             file,
+            slot: CaSlotInfo::default(),
         };
 
         ca.reset()?;
 
-        let delay = Duration::from_millis(50);
-        thread::sleep(delay);
-
-        //
+        thread::sleep(CA_DELAY);
 
         let mut caps = CaCaps::default();
 
@@ -135,27 +119,55 @@ impl CaDevice {
                 break;
             }
 
-            thread::sleep(delay);
+            thread::sleep(CA_DELAY);
         }
 
-        if caps.slot_num == 0 {
-            return Err(anyhow!("CA: device has no slots"));
+        if slot >= caps.slot_num {
+            return Err(anyhow!("CA: slot {} not found", slot));
         }
 
-        // TODO: slots vec
+        ca.slot.slot_num = slot;
+        ca.get_slot_info()?;
 
-        let mut slot_info = CaSlotInfo::default();
-
-        for slot_id in 0 .. caps.slot_num {
-            slot_info.slot_num = slot_id;
-            slot_info.slot_type = 0;
-            slot_info.flags = 0;
-
-            ca.get_slot_info(&mut slot_info)?;
-
-            tpdu::init(&ca, slot_id as u8)?;
+        if ca.slot.slot_type != CA_CI_LINK {
+            return Err(anyhow!("CA: incompatible interface"));
         }
+
+        // reset flags
+        ca.slot.flags = CA_CI_MODULE_NOT_FOUND;
 
         Ok(ca)
+    }
+
+    pub fn poll(&mut self) -> Result<()> {
+        thread::sleep(CA_DELAY);
+
+        let flags = self.slot.flags;
+
+        self.get_slot_info()?;
+
+        match self.slot.flags {
+            CA_CI_MODULE_PRESENT => {
+                if flags == CA_CI_MODULE_READY {
+                    // TODO: de-init
+                }
+                return Ok(())
+            }
+            CA_CI_MODULE_READY => {
+                if flags != CA_CI_MODULE_READY {
+                    tpdu::init(self, self.slot.slot_num as u8)?;
+                }
+            }
+            CA_CI_MODULE_NOT_FOUND => {
+                return Err(anyhow!("CA: module not found"));
+            }
+            _ => {
+                return Err(anyhow!("CA: invalid slot flags"));
+            }
+        };
+
+        // TODO: poll self.as_raw_fd()
+
+        unimplemented!()
     }
 }

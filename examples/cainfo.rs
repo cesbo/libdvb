@@ -3,10 +3,7 @@ use {
         path::Path,
     },
 
-    anyhow::{
-        Context,
-        Result,
-    },
+    anyhow::Result,
 
     libdvb::{
         CaDevice,
@@ -17,7 +14,12 @@ use {
 fn check_ca(path: &Path) -> Result<()> {
     println!("CA: {}", path.display());
 
-    let ca = CaDevice::open(path)?;
+    let mut ca = CaDevice::open(path, 0)?;
+
+    // loop for about 3s
+    for _ in 0 .. 30 {
+        ca.poll()?;
+    }
 
     Ok(())
 }
