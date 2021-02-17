@@ -210,7 +210,7 @@ impl FeStatus {
         }
     }
 
-    fn normalize_signal_strength(&mut self, fe: &FeDevice) -> Result<()> {
+    fn normalize_signal_strength(&mut self) -> Result<()> {
         let mut stats = unsafe { &mut self.props[IDX_SIGNAL_STRENGTH].u.st };
 
         for i in usize::from(stats.len) .. 2 {
@@ -229,12 +229,9 @@ impl FeStatus {
             return Ok(())
         }
 
-        // fallback to DVBv3 API
+        // calculate relative value
 
-        if let Ok(value) = fe.read_signal_strength() {
-            stats.stat[1].scale = FE_SCALE_RELATIVE;
-            stats.stat[1].value = i64::from(value);
-        } else if stats.stat[0].scale == FE_SCALE_DECIBEL {
+        if stats.stat[0].scale == FE_SCALE_DECIBEL {
             // TODO: check delivery_system
 
             let lo: i64 = -85000;
@@ -255,7 +252,7 @@ impl FeStatus {
         Ok(())
     }
 
-    fn normalize_snr(&mut self, fe: &FeDevice) -> Result<()> {
+    fn normalize_snr(&mut self) -> Result<()> {
         let delivery_system = self.get_delivery_system();
         let modulation = self.get_modulation();
 
@@ -277,12 +274,9 @@ impl FeStatus {
             return Ok(())
         }
 
-        // fallback to DVBv3 API
+        // calculate relative value
 
-        if let Ok(value) = fe.read_snr() {
-            stats.stat[1].scale = FE_SCALE_RELATIVE;
-            stats.stat[1].value = i64::from(value);
-        } else if stats.stat[0].scale == FE_SCALE_DECIBEL {
+        if stats.stat[0].scale == FE_SCALE_DECIBEL {
             let hi = match delivery_system {
                 SYS_DVBS |
                 SYS_DVBS2 => 15000,
@@ -364,8 +358,8 @@ impl FeStatus {
 
     /// set decibel to `stat[0]` and relative to `stat[1]` and fallback to DVBv3 API
     fn normalize_props(&mut self, fe: &FeDevice) -> Result<()> {
-        self.normalize_signal_strength(fe)?;
-        self.normalize_snr(fe)?;
+        self.normalize_signal_strength()?;
+        self.normalize_snr()?;
         self.normalize_ber(fe)?;
         self.normalize_unc(fe)?;
 
