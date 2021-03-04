@@ -48,6 +48,9 @@ use {
 };
 
 
+pub const EMPTY_MAC: &str = "00:00:00:00:00:00";
+
+
 /// A reference to the network device
 #[derive(Debug)]
 pub struct NetDevice {
@@ -55,12 +58,47 @@ pub struct NetDevice {
 
     /// Interface name
     name: String,
+
+    /// MAC address
+    mac: String,
 }
 
 
 impl AsRawFd for NetDevice {
     #[inline]
     fn as_raw_fd(&self) -> RawFd { self.file.as_raw_fd() }
+}
+
+
+fn read_interface_name<T: AsRawFd>(file: &T) -> Result<String> {
+    let s = fstat(file.as_raw_fd())?;
+
+    let path = format!("/sys/dev/char/{}:{}", major(s.st_rdev), minor(s.st_rdev));
+    let name = readlink(path.as_str())?
+        .to_str()
+        .unwrap_or_default()
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .split(".net")
+        .collect::<Vec<&str>>()
+        .join("_");
+
+    Ok(name)
+}
+
+
+fn read_mac_address(name: &str) -> Result<String> {
+    ensure!(name.starts_with("dvb"), "incorrect interface name");
+
+    let len = 2 * 6 + 5;
+
+    let mut mac = String::with_capacity(len);
+    let path = format!("/sys/class/net/{}/address", name);
+    let file = File::open(&path)?;
+    file.take(len as u64).read_to_string(&mut mac)?;
+
+    Ok(mac)
 }
 
 
@@ -74,25 +112,13 @@ impl NetDevice {
             .open(path)
             .context("NET: open")?;
 
-        let s = fstat(file.as_raw_fd())?;
-        let sys_path = format!(
-            "/sys/dev/char/{}:{}",
-            major(s.st_rdev),
-            minor(s.st_rdev)
-        );
-        let name = readlink(sys_path.as_str())?
-            .to_str()
-            .unwrap_or_default()
-            .rsplit('/')
-            .next()
-            .unwrap_or_default()
-            .split(".net")
-            .collect::<Vec<&str>>()
-            .join("_");
+        let name = read_interface_name(&file).context("NET: read interface name")?;
+        let mac = read_mac_address(&name).unwrap_or_else(|_| EMPTY_MAC.to_owned());
 
         let net = NetDevice {
             file,
             name,
+            mac,
         };
 
         Ok(net)
@@ -102,17 +128,8 @@ impl NetDevice {
     /// and `{1}` is a device number
     pub fn get_name(&self) -> &str { self.name.as_str() }
 
-    /// Reads and returns interface MAC address
-    pub fn get_mac(&self) -> Result<String> {
-        let path = format!("/sys/class/net/{}/address", self.get_name());
-
-        let len = 2 * 6 + 5;
-        let file = File::open(&path)?;
-        let mut result = String::with_capacity(len);
-        file.take(2 * 6 + 5).read_to_string(&mut result)?;
-
-        Ok(result)
-    }
+    /// Returns interface MAC address
+    pub fn get_mac(&self) -> &str { self.mac.as_str() }
 
     /// Creates a new network interface
     pub fn add_if(&self, data: &mut DvbNetIf) -> Result<()> {

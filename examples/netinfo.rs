@@ -22,12 +22,7 @@ fn check_net(path: &Path) -> Result<()> {
 
     dev.add_if(&mut info)?;
     println!("Interface: {}", dev.get_name());
-
-    let mac = match dev.get_mac() {
-        Ok(v) => v,
-        Err(e) => e.to_string(),
-    };
-    println!("MAC: {}", mac);
+    println!("MAC: {}", dev.get_mac());
 
     dev.remove_if(&info)?;
 
