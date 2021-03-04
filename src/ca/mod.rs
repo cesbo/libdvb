@@ -139,9 +139,7 @@ impl CaDevice {
         Ok(ca)
     }
 
-    pub fn poll(&mut self) -> Result<()> {
-        thread::sleep(CA_DELAY);
-
+    fn poll_timer(&mut self) -> Result<()> {
         let flags = self.slot.flags;
 
         self.get_slot_info()?;
@@ -166,8 +164,14 @@ impl CaDevice {
             }
         };
 
-        // TODO: poll self.as_raw_fd()
+        // TODO: check queue?
 
-        unimplemented!()
+        Ok(())
+    }
+
+    fn poll_event(&mut self) -> Result<()> {
+        // TODO: tpdu read
+
+        Ok(())
     }
 }
