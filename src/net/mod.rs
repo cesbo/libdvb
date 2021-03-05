@@ -3,13 +3,12 @@ pub mod sys;
 
 use {
     std::{
-        io::{
-            Read,
-        },
+        fmt,
         fs::{
             File,
             OpenOptions,
         },
+        io::Read,
         os::unix::{
             fs::{
                 OpenOptionsExt,
@@ -19,7 +18,6 @@ use {
                 RawFd,
             },
         },
-        path::Path,
     },
 
     anyhow::{
@@ -28,17 +26,6 @@ use {
     },
 
     nix::{
-        fcntl::{
-            readlink,
-        },
-        sys::{
-            stat::{
-                fstat,
-                major,
-                minor,
-            },
-        },
-
         ioctl_readwrite,
         ioctl_write_int_bad,
         request_code_none,
@@ -49,18 +36,16 @@ use {
 
 
 pub const EMPTY_MAC: &str = "00:00:00:00:00:00";
+const MAC_SIZE: usize = EMPTY_MAC.len();
 
 
 /// A reference to the network device
 #[derive(Debug)]
 pub struct NetDevice {
+    adapter: u32,
+    device: u32,
+
     file: File,
-
-    /// Interface name
-    name: String,
-
-    /// MAC address
-    mac: String,
 }
 
 
@@ -70,86 +55,93 @@ impl AsRawFd for NetDevice {
 }
 
 
-fn read_interface_name<T: AsRawFd>(file: &T) -> Result<String> {
-    let s = fstat(file.as_raw_fd())?;
-
-    let path = format!("/sys/dev/char/{}:{}", major(s.st_rdev), minor(s.st_rdev));
-    let name = readlink(path.as_str())?
-        .to_str()
-        .unwrap_or_default()
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .split(".net")
-        .collect::<Vec<&str>>()
-        .join("_");
-
-    Ok(name)
-}
-
-
-fn read_mac_address(name: &str) -> Result<String> {
-    ensure!(name.starts_with("dvb"), "incorrect interface name");
-
-    let len = 2 * 6 + 5;
-
-    let mut mac = String::with_capacity(len);
-    let path = format!("/sys/class/net/{}/address", name);
-    let file = File::open(&path)?;
-    file.take(len as u64).read_to_string(&mut mac)?;
-
-    Ok(mac)
-}
-
-
 impl NetDevice {
     /// Attempts to open a network device in read-write mode
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<NetDevice> {
+    pub fn open(adapter: u32, device: u32) -> Result<NetDevice> {
+        let path = format!("/dev/dvb/adapter{}/net{}", adapter, device);
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(path)
+            .open(&path)
             .context("NET: open")?;
 
-        let name = read_interface_name(&file).context("NET: read interface name")?;
-        let mac = read_mac_address(&name).unwrap_or_else(|_| EMPTY_MAC.to_owned());
-
         let net = NetDevice {
+            adapter,
+            device,
             file,
-            name,
-            mac,
         };
 
         Ok(net)
     }
 
-    /// Returns interface name in format `dvb{0}_{1}` where `{0}` is adapter number
-    /// and `{1}` is a device number
-    pub fn get_name(&self) -> &str { self.name.as_str() }
+    /// Creates a new network interface and returns interface number
+    pub fn add_if(&self, pid: u16, feedtype: u8) -> Result<NetInterface> {
+        let mut data = DvbNetIf {
+            pid,
+            if_num: 0,
+            feedtype,
+        };
 
-    /// Returns interface MAC address
-    pub fn get_mac(&self) -> &str { self.mac.as_str() }
-
-    /// Creates a new network interface
-    pub fn add_if(&self, data: &mut DvbNetIf) -> Result<()> {
         // NET_ADD_IF
         ioctl_readwrite!(#[inline] ioctl_call, b'o', 52, DvbNetIf);
         unsafe {
-            ioctl_call(self.as_raw_fd(), data as *mut _)
+            ioctl_call(self.as_raw_fd(), &mut data as *mut _)
         }.context("NET: add if")?;
 
-        Ok(())
+        Ok(NetInterface {
+            net: self,
+            if_num: data.if_num,
+        })
     }
 
     /// Removes a network interface
-    pub fn remove_if(&self, data: &DvbNetIf) -> Result<()> {
+    pub fn remove_if(&self, interface: NetInterface) -> Result<()> {
         // NET_REMOVE_IF
         ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 53));
         unsafe {
-            ioctl_call(self.as_raw_fd(), data.if_num as _)
+            ioctl_call(self.as_raw_fd(), i32::from(interface.if_num))
         }.context("NET: remove if")?;
 
         Ok(())
+    }
+}
+
+
+pub struct NetInterface<'a> {
+    net: &'a NetDevice,
+    if_num: u16,
+}
+
+
+impl<'a> fmt::Display for NetInterface<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.net.device == 0 {
+            write!(f, "dvb{}_{}", self.net.adapter, self.if_num)
+        } else {
+            write!(f, "dvb{}{}{}", self.net.adapter, self.net.device, self.if_num)
+        }
+    }
+}
+
+
+impl<'a> NetInterface<'a> {
+    /// Returns interface mac address or empty mac on any error
+    pub fn get_mac(&self) -> String {
+        let path = format!("/sys/class/net/{}/address", self);
+        let file = match File::open(&path) {
+            Ok(v) => v,
+            _ => return EMPTY_MAC.to_owned(),
+        };
+
+        let mut mac = String::with_capacity(MAC_SIZE);
+        let result = file
+            .take(MAC_SIZE as u64)
+            .read_to_string(&mut mac);
+
+        match result {
+            Ok(MAC_SIZE) => mac,
+            _ => EMPTY_MAC.to_owned(),
+        }
     }
 }
