@@ -1,7 +1,9 @@
-use anyhow::{Context, bail};
-
 use {
-    anyhow::Result,
+    anyhow::{
+        bail,
+        Context,
+        Result,
+    },
 
     libdvb::NetDevice,
 };

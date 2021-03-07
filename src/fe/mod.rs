@@ -48,6 +48,9 @@ pub use {
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
+    adapter: u32,
+    device: u32,
+
     file: File,
 
     api_version: u16,
@@ -166,15 +169,20 @@ impl FeDevice {
         Ok(())
     }
 
-    fn open<P: AsRef<Path>>(path: P, w: bool) -> Result<FeDevice> {
+    /// Attempts to open a frontend device in read-only mode
+    pub fn open(adapter: u32, device: u32, readonly: bool) -> Result<FeDevice> {
+        let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
         let file = OpenOptions::new()
             .read(true)
-            .write(w)
+            .write(!readonly)
             .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(path)
+            .open(&path)
             .context("FE: open")?;
 
         let mut fe = FeDevice {
+            adapter,
+            device,
+
             file,
 
             api_version: 0,
@@ -190,14 +198,6 @@ impl FeDevice {
 
         Ok(fe)
     }
-
-    /// Attempts to open a frontend device in read-only mode
-    #[inline]
-    pub fn open_rd<P: AsRef<Path>>(path: P) -> Result<FeDevice> { Self::open(path, false) }
-
-    /// Attempts to open a frontend device in read-write mode
-    #[inline]
-    pub fn open_rw<P: AsRef<Path>>(path: P) -> Result<FeDevice> { Self::open(path, true) }
 
     fn check_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         for p in cmdseq {
