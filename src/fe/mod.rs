@@ -21,7 +21,6 @@ use {
                 RawFd,
             },
         },
-        path::Path,
     },
 
     anyhow::{
@@ -177,7 +176,7 @@ impl FeDevice {
             .write(!readonly)
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)
-            .context("FE: open")?;
+            .with_context(|| format!("FE: failed to open device {}", &path))?;
 
         let mut fe = FeDevice {
             adapter,

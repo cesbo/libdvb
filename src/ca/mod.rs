@@ -7,9 +7,6 @@ pub mod sys;
 
 use {
     std::{
-        path::{
-            Path,
-        },
         fs::{
             File,
             OpenOptions,
@@ -102,8 +99,8 @@ impl CaDevice {
             .read(true)
             .write(true)
             .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(path)
-            .with_context(|| format!("CA: failed to open device {}", path.display()))?;
+            .open(&path)
+            .with_context(|| format!("CA: failed to open device {}", &path))?;
 
         let mut ca = CaDevice {
             adapter,

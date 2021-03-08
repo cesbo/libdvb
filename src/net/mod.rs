@@ -64,7 +64,7 @@ impl NetDevice {
             .write(true)
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)
-            .context("NET: open")?;
+            .with_context(|| format!("NET: failed to open device {}", &path))?;
 
         let net = NetDevice {
             adapter,
