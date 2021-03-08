@@ -44,6 +44,9 @@ const CA_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct CaDevice {
+    adapter: u32,
+    device: u32,
+
     file: File,
     slot: CaSlotInfo,
 }
@@ -93,7 +96,8 @@ impl CaDevice {
     }
 
     /// Attempts to open a CA device
-    pub fn open(path: &Path, slot: u32) -> Result<CaDevice> {
+    pub fn open(adapter: u32, device: u32, slot: u32) -> Result<CaDevice> {
+        let path = format!("/dev/dvb/adapter{}/ca{}", adapter, device);
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -102,6 +106,9 @@ impl CaDevice {
             .with_context(|| format!("CA: failed to open device {}", path.display()))?;
 
         let mut ca = CaDevice {
+            adapter,
+            device,
+
             file,
             slot: CaSlotInfo::default(),
         };

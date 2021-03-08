@@ -1,6 +1,5 @@
 use {
     std::{
-        path::Path,
         os::unix::io::AsRawFd,
     },
 
@@ -33,9 +32,7 @@ use {
 };
 
 
-fn check_ca(path: &Path) -> Result<()> {
-    println!("CA: {}", path.display());
-
+fn start_ca(adapter: u32, device: u32) -> Result<()> {
     // let mut ca = CaDevice::open(path, 0)?;
 
     let timer = TimerFd::new(
@@ -100,12 +97,16 @@ fn check_ca(path: &Path) -> Result<()> {
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    if let Some(path) = args.next() {
-        let path = Path::new(&path);
-        check_ca(&path)?;
-    } else {
-        eprintln!("path to ca device is not defined");
-    }
 
-    Ok(())
+    let adapter = match args.next() {
+        Some(v) => v.parse::<u32>().context("adapter number")?,
+        None => bail!("adapter number not defined"),
+    };
+
+    let device = match args.next() {
+        Some(v) => v.parse::<u32>().context("device number")?,
+        None => 0,
+    };
+
+    start_ca(adapter, device)
 }
