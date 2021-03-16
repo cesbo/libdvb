@@ -3,7 +3,11 @@ use {
         os::unix::io::AsRawFd,
     },
 
-    anyhow::Result,
+    anyhow::{
+        bail,
+        Context,
+        Result,
+    },
 
     nix::{
         poll::{

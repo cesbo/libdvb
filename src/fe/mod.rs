@@ -168,12 +168,11 @@ impl FeDevice {
         Ok(())
     }
 
-    /// Attempts to open a frontend device in read-only mode
-    pub fn open(adapter: u32, device: u32, readonly: bool) -> Result<FeDevice> {
+    fn open(adapter: u32, device: u32, is_write: bool) -> Result<FeDevice> {
         let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
         let file = OpenOptions::new()
             .read(true)
-            .write(!readonly)
+            .write(is_write)
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)
             .with_context(|| format!("FE: failed to open device {}", &path))?;
@@ -196,6 +195,20 @@ impl FeDevice {
         fe.get_info()?;
 
         Ok(fe)
+    }
+
+    /// Attempts to open frontend device in read-only mode
+    #[inline]
+    pub fn open_ro(adapter: u32, device: u32) -> Result<FeDevice>
+    {
+        Self::open(adapter, device, false)
+    }
+
+    /// Attempts to open frontend device in read-write mode
+    #[inline]
+    pub fn open_rw(adapter: u32, device: u32) -> Result<FeDevice>
+    {
+        Self::open(adapter, device, true)
     }
 
     fn check_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {

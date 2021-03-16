@@ -30,7 +30,7 @@ fn main() -> Result<()> {
         None => 0,
     };
 
-    let fe = FeDevice::open(adapter, device, true)?;
+    let fe = FeDevice::open_ro(adapter, device)?;
     let mut status = FeStatus::default();
 
     let delay = Duration::from_secs(1);
