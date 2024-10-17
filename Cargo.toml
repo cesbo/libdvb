@@ -9,7 +9,7 @@ documentation = "https://docs.rs/libdvb"
 repository = "https://github.com/cesbo/libdvb"
 keywords = ["dvb", "ts"]
 categories = ["api-bindings", "hardware-support"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 nix = "0.19"

@@ -47,9 +47,6 @@ pub use {
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
-    adapter: u32,
-    device: u32,
-
     file: File,
 
     api_version: u16,
@@ -146,11 +143,11 @@ impl FeDevice {
 
         // DVB API Version
 
-        self.api_version = unsafe { cmdseq[0].u.data as u16 };
+        self.api_version = cmdseq[0].get_data() as u16;
 
         // Suppoerted delivery systems
 
-        let u_buffer = unsafe { &cmdseq[1].u.buffer };
+        let u_buffer = unsafe { cmdseq[1].u.buffer };
         let u_buffer_len = ::std::cmp::min(u_buffer.len as usize, u_buffer.data.len());
         u_buffer.data[.. u_buffer_len]
             .iter()
@@ -178,9 +175,6 @@ impl FeDevice {
             .with_context(|| format!("FE: failed to open device {}", &path))?;
 
         let mut fe = FeDevice {
-            adapter,
-            device,
-
             file,
 
             api_version: 0,
