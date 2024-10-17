@@ -3,7 +3,7 @@ use {
         fmt,
     },
 
-    anyhow::Result,
+    crate::error::Result,
 
     super::{
         FeDevice,

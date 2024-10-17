@@ -19,15 +19,15 @@ use {
         },
     },
 
-    anyhow::{
-        Result,
-        Context,
-    },
-
     super::{
         asn1,
         CaDevice,
         spdu,
+    },
+
+    crate::error::{
+        Error,
+        Result,
     },
 };
 
@@ -60,11 +60,11 @@ pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
     // TODO: read packet
 
     if data.len() < 4 {
-        return Err(anyhow!("CA TPDU: invalid packet size"));
+        return Err(Error::InvalidData("invalid ca tpdu packet size".to_owned()));
     }
 
     if data[1] == 0 /* TODO: || data[1] > ca.slots.len() */ {
-        return Err(anyhow!("CA TPDU: invalid slot id {}", data[1]));
+        return Err(Error::InvalidData(format!("invalid ca tpdu slot id {}", data[1])));
     }
 
     let slot_id = data[1] - 1;
@@ -90,7 +90,7 @@ pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
 
         TT_SB => {}
         _ => {
-            return Err(anyhow!("CA TPDU: invalid tag 0x{:02X}", tag));
+            return Err(Error::InvalidData(format!("invalid ca tpdu tag 0x{:02X}", tag)));
         }
     }
 
@@ -101,7 +101,7 @@ pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
 /// Writes TPDU to the CA device
 pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
     if data.len() >= TPDU_SIZE_MAX {
-        return Err(anyhow!("CA TPDU: packet is to large"));
+        return Err(Error::InvalidData("ca tpdu packet is to large".to_owned()));
     }
 
     // TODO: queue and send messages only if module ready
@@ -123,8 +123,7 @@ pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
     ];
 
     // TODO: write_all_vectored
-    (&ca.file).write_vectored(bufs)
-        .context("CA TPDU: write failed")?;
+    (&ca.file).write_vectored(bufs)?;
 
     Ok(())
 }

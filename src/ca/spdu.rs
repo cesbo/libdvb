@@ -9,9 +9,9 @@
 use {
     std::convert::TryInto,
 
-    anyhow::{
+    crate::error::{
+        Error,
         Result,
-        Context,
     },
 
     super::{
@@ -54,7 +54,7 @@ fn assert_size(spdu: &[u8], size: usize) -> Result<()> {
     if spdu.len() >= size && usize::from(spdu[2]) == size - 2 {
         Ok(())
     } else {
-        Err(anyhow!("CA SPDU: invalid size"))
+        Err(Error::InvalidData("invalid ca spdu size".to_string()))
     }
 }
 
@@ -131,30 +131,27 @@ fn handle_close_session_response(ca: &mut CaDevice, _slot_id: u8, spdu: &[u8]) -
 /// Process received message depends of it tag
 pub fn handle(ca: &mut CaDevice, slot_id: u8, spdu: &[u8]) -> Result<()> {
     if spdu.len() < SPDU_HEADER_SIZE {
-        return Err(anyhow!("CA SPDU: message is too short"));
+        return Err(Error::InvalidData("ca spdu message is too short".to_string()));
     }
 
     match spdu[0] {
         ST_SESSION_NUMBER => {
             handle_session_number(ca, slot_id, spdu)
-                .context("ST_SESSION_NUMBER failed")
         }
         ST_OPEN_SESSION_REQUEST => {
             handle_open_session_request(ca, slot_id, spdu)
-                .context("ST_OPEN_SESSION_REQUEST failed")
         }
         ST_CLOSE_SESSION_REQUEST => {
             handle_close_session_request(ca, slot_id, spdu)
-                .context("ST_CLOSE_SESSION_REQUEST failed")
         }
         ST_CREATE_SESSION_RESPONSE => {
             handle_create_session_response(ca, slot_id, spdu)
-                .context("ST_CREATE_SESSION_RESPONSE failed")
         }
         ST_CLOSE_SESSION_RESPONSE => {
             handle_close_session_response(ca, slot_id, spdu)
-                .context("ST_CLOSE_SESSION_RESPONSE failed")
         }
-        tag => Err(anyhow!("CA SPDU: invalid tag 0x{:02X}", tag)),
+        tag => {
+            Err(Error::InvalidData(format!("invalid ca spdu tag 0x{:02X}", tag)))
+        }
     }
 }
