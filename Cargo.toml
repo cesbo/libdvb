@@ -12,5 +12,5 @@ categories = ["api-bindings", "hardware-support"]
 edition = "2021"
 
 [dependencies]
-nix = "0.19"
+nix = { version = "0.29", features = ["ioctl"] }
 thiserror = "1"
