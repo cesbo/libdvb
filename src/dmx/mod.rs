@@ -40,6 +40,7 @@ impl AsRawFd for DmxDevice {
 
 
 impl DmxDevice {
+    /// Attempts to open frontend device in read-write mode
     pub fn open(adapter: u32, device: u32) -> Result<Self> {
         let path = format!("/dev/dvb/adapter{}/demux{}", adapter, device);
         let file = OpenOptions::new()
@@ -55,6 +56,7 @@ impl DmxDevice {
         Ok(dmx)
     }
 
+    /// Sets up a PES filter based on the packet identifier (PID)
     pub fn set_pes_filter(&self, filter: &DmxPesFilterParams) -> Result<()> {
         // DMX_SET_PES_FILTER
         nix::ioctl_write_ptr!(#[inline] ioctl_call, b'o', 44, DmxPesFilterParams);
@@ -65,7 +67,10 @@ impl DmxDevice {
         Ok(())
     }
 
-    pub fn set_buffer_size(&self, buffer_size: u64) -> Result<()> {
+    /// Sets the size of the circular buffer used for filtered data.
+    /// Recommended to use values that are multiples of 4096 bytes.
+    /// The default size is 2 * 4096 bytes.
+    pub fn set_buffer_size(&self, buffer_size: nix::libc::c_int) -> Result<()> {
         // DMX_SET_BUFFER_SIZE
         nix::ioctl_write_int!(#[inline] ioctl_call, b'o', 45);
         unsafe {
@@ -75,6 +80,7 @@ impl DmxDevice {
         Ok(())
     }
 
+    /// Starts the filtering operation.
     pub fn start(&self) -> Result<()> {
         // DMX_START
         nix::ioctl_none!(#[inline] ioctl_call, b'o', 41);
@@ -85,6 +91,7 @@ impl DmxDevice {
         Ok(())
     }
 
+    /// Stops the filtering operation.
     pub fn stop(&self) -> Result<()> {
         // DMX_STOP
         nix::ioctl_none!(#[inline] ioctl_call, b'o', 42);
