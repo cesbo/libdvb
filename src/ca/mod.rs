@@ -22,17 +22,12 @@ use {
         thread,
     },
 
-    nix::{
-        ioctl_none,
-        ioctl_read,
-    },
-
-    sys::*,
-
     crate::error::{
         Error,
         Result,
     },
+
+    self::sys::*,
 };
 
 
@@ -60,7 +55,7 @@ impl CaDevice {
     #[inline]
     pub fn reset(&mut self) -> Result<()> {
         // CA_RESET
-        ioctl_none!(#[inline] ca_reset, b'o', 128);
+        nix::ioctl_none!(#[inline] ca_reset, b'o', 128);
         unsafe {
             ca_reset(self.as_raw_fd())
         }?;
@@ -72,7 +67,7 @@ impl CaDevice {
     #[inline]
     pub fn get_caps(&self, caps: &mut CaCaps) -> Result<()> {
         // CA_GET_CAP
-        ioctl_read!(#[inline] ca_get_cap, b'o', 129, CaCaps);
+        nix::ioctl_read!(#[inline] ca_get_cap, b'o', 129, CaCaps);
         unsafe {
             ca_get_cap(self.as_raw_fd(), caps as *mut _)
         }?;
@@ -84,7 +79,7 @@ impl CaDevice {
     #[inline]
     pub fn get_slot_info(&mut self) -> Result<()> {
         // CA_GET_SLOT_INFO
-        ioctl_read!(#[inline] ca_get_slot_info, b'o', 130, CaSlotInfo);
+        nix::ioctl_read!(#[inline] ca_get_slot_info, b'o', 130, CaSlotInfo);
         unsafe {
             ca_get_slot_info(self.as_raw_fd(), &mut self.slot as *mut _)
         }?;

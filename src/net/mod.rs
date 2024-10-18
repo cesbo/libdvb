@@ -1,5 +1,6 @@
 pub mod sys;
 
+
 use {
     std::{
         fmt,
@@ -19,15 +20,9 @@ use {
         },
     },
 
-    nix::{
-        ioctl_readwrite,
-        ioctl_write_int_bad,
-        request_code_none,
-    },
-
-    sys::*,
-
     crate::error::Result,
+
+    self::sys::*,
 };
 
 
@@ -79,7 +74,7 @@ impl NetDevice {
         };
 
         // NET_ADD_IF
-        ioctl_readwrite!(#[inline] ioctl_call, b'o', 52, DvbNetIf);
+        nix::ioctl_readwrite!(#[inline] ioctl_call, b'o', 52, DvbNetIf);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut data as *mut _)
         }?;
@@ -93,7 +88,7 @@ impl NetDevice {
     /// Removes a network interface
     pub fn remove_if(&self, interface: NetInterface) -> Result<()> {
         // NET_REMOVE_IF
-        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 53));
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 53));
         unsafe {
             ioctl_call(self.as_raw_fd(), i32::from(interface.if_num))
         }?;

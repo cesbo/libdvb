@@ -1,6 +1,7 @@
 mod status;
 pub mod sys;
 
+
 use {
     std::{
         ffi::CStr,
@@ -22,19 +23,12 @@ use {
         },
     },
 
-    nix::{
-        ioctl_read,
-        ioctl_write_ptr,
-        ioctl_write_int_bad,
-        request_code_none,
-    },
-
-    sys::*,
-
     crate::error::{
         Error,
         Result,
     },
+
+    self::sys::*,
 };
 
 
@@ -115,7 +109,7 @@ impl FeDevice {
         let mut feinfo = FeInfo::default();
 
         // FE_GET_INFO
-        ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _)
         }?;
@@ -285,7 +279,7 @@ impl FeDevice {
         };
 
         // FE_SET_PROPERTY
-        ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
+        nix::ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
         }?;
@@ -307,7 +301,7 @@ impl FeDevice {
         };
 
         // FE_GET_PROPERTY
-        ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut cmd as *mut _)
         }?;
@@ -318,7 +312,7 @@ impl FeDevice {
     /// Returns a frontend events if available
     pub fn get_event(&self, event: &mut FeEvent) -> Result<()> {
         // FE_GET_EVENT
-        ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
         unsafe {
             ioctl_call(self.as_raw_fd(), event as *mut _)
         }?;
@@ -339,7 +333,7 @@ impl FeDevice {
         let mut result: u32 = FE_NONE;
 
         // FE_READ_STATUS
-        ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
         }?;
@@ -352,7 +346,7 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SIGNAL_STRENGTH
-        ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
         }?;
@@ -365,7 +359,7 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SNR
-        ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
         }?;
@@ -378,7 +372,7 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_BER
-        ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
         }?;
@@ -391,7 +385,7 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_UNCORRECTED_BLOCKS
-        ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
         }?;
@@ -407,7 +401,7 @@ impl FeDevice {
     /// - SEC_TONE_OFF - turn 22kHz off
     pub fn set_tone(&self, value: u32) -> Result<()> {
         // FE_SET_TONE
-        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 66));
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 66));
 
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
@@ -436,7 +430,7 @@ impl FeDevice {
     ///   to use same LNB with several receivers.
     pub fn set_voltage(&self, value: u32) -> Result<()> {
         // FE_SET_VOLTAGE
-        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 67));
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 67));
 
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
@@ -471,7 +465,7 @@ impl FeDevice {
         cmd.len = msg.len() as u8;
 
         // FE_DISEQC_SEND_MASTER_CMD
-        ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
+        nix::ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
         }?;
