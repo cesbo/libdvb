@@ -8,4 +8,4 @@ repository = ""
 edition = "2021"
 
 [dependencies]
-libdvb = { path = ".." }
+libdvb = { path = "../.." }

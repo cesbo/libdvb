@@ -65,7 +65,7 @@ impl DmxDevice {
         Ok(())
     }
 
-    pub fn set_buffer_size(&self, buffer_size: i32) -> Result<()> {
+    pub fn set_buffer_size(&self, buffer_size: u64) -> Result<()> {
         // DMX_SET_BUFFER_SIZE
         nix::ioctl_write_int!(#[inline] ioctl_call, b'o', 45);
         unsafe {
