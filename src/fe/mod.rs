@@ -23,19 +23,12 @@ use {
         },
     },
 
-    anyhow::{
-        Context,
+    crate::error::{
+        Error,
         Result,
     },
 
-    nix::{
-        ioctl_read,
-        ioctl_write_ptr,
-        ioctl_write_int_bad,
-        request_code_none,
-    },
-
-    sys::*,
+    self::sys::*,
 };
 
 
@@ -47,9 +40,6 @@ pub use {
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
-    adapter: u32,
-    device: u32,
-
     file: File,
 
     api_version: u16,
@@ -102,7 +92,7 @@ impl FeDevice {
             DtvProperty::new(DTV_TONE, SEC_TONE_OFF),
             DtvProperty::new(DTV_CLEAR, 0),
         ];
-        self.set_properties(&cmdseq).context("FE: clear")?;
+        self.set_properties(&cmdseq)?;
 
         let mut event = FeEvent::default();
 
@@ -119,10 +109,10 @@ impl FeDevice {
         let mut feinfo = FeInfo::default();
 
         // FE_GET_INFO
-        ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _)
-        }.context("FE: get info")?;
+        }?;
 
         if let Some(len) = feinfo.name.iter().position(|&b| b == 0) {
             let name = unsafe { CStr::from_ptr(feinfo.name[.. len + 1].as_ptr()) };
@@ -142,15 +132,15 @@ impl FeDevice {
             DtvProperty::new(DTV_API_VERSION, 0),
             DtvProperty::new(DTV_ENUM_DELSYS, 0),
         ];
-        self.get_properties(&mut cmdseq).context("FE: get api version (deprecated driver)")?;
+        self.get_properties(&mut cmdseq)?;
 
         // DVB API Version
 
-        self.api_version = unsafe { cmdseq[0].u.data as u16 };
+        self.api_version = cmdseq[0].get_data() as u16;
 
         // Suppoerted delivery systems
 
-        let u_buffer = unsafe { &cmdseq[1].u.buffer };
+        let u_buffer = unsafe { cmdseq[1].u.buffer };
         let u_buffer_len = ::std::cmp::min(u_buffer.len as usize, u_buffer.data.len());
         u_buffer.data[.. u_buffer_len]
             .iter()
@@ -158,12 +148,13 @@ impl FeDevice {
 
         // dev-file metadata
 
-        let metadata = self.file.metadata().context("FE: get device metadata")?;
+        let metadata = self.file.metadata()?;
 
-        ensure!(
-            metadata.file_type().is_char_device(),
-            "FE: path is not to char device"
-        );
+        if !metadata.file_type().is_char_device() {
+            return Err(Error::InvalidProperty(
+                "invalid frontend device path".to_owned()
+            ));
+        }
 
         Ok(())
     }
@@ -174,13 +165,9 @@ impl FeDevice {
             .read(true)
             .write(is_write)
             .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(&path)
-            .with_context(|| format!("FE: failed to open device {}", &path))?;
+            .open(&path)?;
 
         let mut fe = FeDevice {
-            adapter,
-            device,
-
             file,
 
             api_version: 0,
@@ -216,59 +203,58 @@ impl FeDevice {
             match p.cmd {
                 DTV_FREQUENCY => {
                     let v = unsafe { p.u.data };
-                    ensure!(
-                        self.frequency_range.contains(&v),
-                        "FE: frequency out of range"
-                    );
+                    if !self.frequency_range.contains(&v) {
+                        return Err(Error::InvalidProperty(
+                            "frequency out of range".to_owned()
+                        ));
+                    }
                 }
                 DTV_SYMBOL_RATE => {
                     let v = unsafe { p.u.data };
-                    ensure!(
-                        self.symbolrate_range.contains(&v),
-                        "FE: symbolrate out of range"
-                    );
+                    if !self.symbolrate_range.contains(&v) {
+                        return Err(Error::InvalidProperty(
+                            "symbolrate out of range".to_owned()
+                        ));
+                    }
                 }
                 DTV_INVERSION => {
                     let v = unsafe { p.u.data };
-                    if v == INVERSION_AUTO {
-                        ensure!(
-                            self.caps & FE_CAN_INVERSION_AUTO != 0,
-                            "FE: auto inversion is not available"
-                        );
+                    if v == INVERSION_AUTO && (self.caps & FE_CAN_INVERSION_AUTO) == 0 {
+                        return Err(Error::InvalidProperty(
+                            "frontend does not support auto inversion".to_owned()
+                        ));
                     }
                 }
                 DTV_TRANSMISSION_MODE => {
                     let v = unsafe { p.u.data };
-                    if v == TRANSMISSION_MODE_AUTO {
-                        ensure!(
-                            self.caps & FE_CAN_TRANSMISSION_MODE_AUTO != 0,
-                            "FE: no auto transmission mode"
-                        );
+                    if v == TRANSMISSION_MODE_AUTO && (self.caps & FE_CAN_TRANSMISSION_MODE_AUTO) == 0 {
+                        return Err(Error::InvalidProperty(
+                            "frontend does not support auto transmission mode".to_owned()
+                        ));
                     }
                 }
                 DTV_GUARD_INTERVAL => {
                     let v = unsafe { p.u.data };
-                    if v == GUARD_INTERVAL_AUTO {
-                        ensure!(
-                            self.caps & FE_CAN_GUARD_INTERVAL_AUTO != 0,
-                            "FE: no auto guard interval"
-                        );
+                    if v == GUARD_INTERVAL_AUTO && (self.caps & FE_CAN_GUARD_INTERVAL_AUTO) == 0 {
+                        return Err(Error::InvalidProperty(
+                            "frontend does not support auto guard interval".to_owned()
+                        ));
                     }
                 }
                 DTV_HIERARCHY => {
                     let v = unsafe { p.u.data };
-                    if v == HIERARCHY_AUTO {
-                        ensure!(
-                            self.caps & FE_CAN_HIERARCHY_AUTO != 0,
-                            "FE: no auto hierarchy"
-                        );
+                    if v == HIERARCHY_AUTO && (self.caps & FE_CAN_HIERARCHY_AUTO) == 0 {
+                        return Err(Error::InvalidProperty(
+                            "frontend does not support auto hierarchy".to_owned()
+                        ));
                     }
                 }
                 DTV_STREAM_ID => {
-                    ensure!(
-                        self.caps & FE_CAN_MULTISTREAM != 0,
-                        "FE: no multistream"
-                    );
+                    if (self.caps & FE_CAN_MULTISTREAM) == 0 {
+                        return Err(Error::InvalidProperty(
+                            "frontend does not support multistream".to_owned()
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -279,7 +265,7 @@ impl FeDevice {
 
     /// Sets properties on frontend device
     pub fn set_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
-        self.check_properties(cmdseq).context("FE: property check")?;
+        self.check_properties(cmdseq)?;
 
         #[repr(C)]
         pub struct DtvProperties {
@@ -293,10 +279,10 @@ impl FeDevice {
         };
 
         // FE_SET_PROPERTY
-        ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
+        nix::ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }.context("FE: set properties")?;
+        }?;
 
         Ok(())
     }
@@ -315,10 +301,10 @@ impl FeDevice {
         };
 
         // FE_GET_PROPERTY
-        ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut cmd as *mut _)
-        }.context("FE: get properties")?;
+        }?;
 
         Ok(())
     }
@@ -326,10 +312,10 @@ impl FeDevice {
     /// Returns a frontend events if available
     pub fn get_event(&self, event: &mut FeEvent) -> Result<()> {
         // FE_GET_EVENT
-        ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
         unsafe {
             ioctl_call(self.as_raw_fd(), event as *mut _)
-        }.context("FE: get event")?;
+        }?;
 
         Ok(())
     }
@@ -347,10 +333,10 @@ impl FeDevice {
         let mut result: u32 = FE_NONE;
 
         // FE_READ_STATUS
-        ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }.context("FE: read status")?;
+        }?;
 
         Ok(result)
     }
@@ -360,10 +346,10 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SIGNAL_STRENGTH
-        ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }.context("FE: read signal strength")?;
+        }?;
 
         Ok(result)
     }
@@ -373,10 +359,10 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SNR
-        ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }.context("FE: read snr")?;
+        }?;
 
         Ok(result)
     }
@@ -386,10 +372,10 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_BER
-        ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }.context("FE: read ber")?;
+        }?;
 
         Ok(result)
     }
@@ -399,10 +385,10 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_UNCORRECTED_BLOCKS
-        ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
+        nix::ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
         unsafe {
             ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }.context("FE: read uncorrected blocks")?;
+        }?;
 
         Ok(result)
     }
@@ -415,11 +401,10 @@ impl FeDevice {
     /// - SEC_TONE_OFF - turn 22kHz off
     pub fn set_tone(&self, value: u32) -> Result<()> {
         // FE_SET_TONE
-        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 66));
-
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 66));
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
-        }.context("FE: set tone")?;
+        }?;
 
         Ok(())
     }
@@ -444,11 +429,10 @@ impl FeDevice {
     ///   to use same LNB with several receivers.
     pub fn set_voltage(&self, value: u32) -> Result<()> {
         // FE_SET_VOLTAGE
-        ioctl_write_int_bad!(#[inline] ioctl_call, request_code_none!(b'o', 67));
-
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 67));
         unsafe {
             ioctl_call(self.as_raw_fd(), value as _)
-        }.context("FE: set voltage")?;
+        }?;
 
         Ok(())
     }
@@ -479,10 +463,10 @@ impl FeDevice {
         cmd.len = msg.len() as u8;
 
         // FE_DISEQC_SEND_MASTER_CMD
-        ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
+        nix::ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
         unsafe {
             ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }.context("FE: diseqc master cmd")?;
+        }?;
 
         Ok(())
     }

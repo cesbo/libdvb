@@ -7,7 +7,7 @@
 
 
 use {
-    anyhow::Result,
+    crate::error::Result,
 
     super::CaDevice,
 };
@@ -17,30 +17,30 @@ pub const APDU_TAG_SIZE: usize = 3;
 
 
 /// Init session and returns session identifier
-pub fn init(ca: &mut CaDevice, resource_id: u32) -> Result<u16> {
+pub fn init(_ca: &mut CaDevice, _resource_id: u32) -> Result<u16> {
     unimplemented!()
 }
 
 
 /// Sends enquiry object to the CAM and allocate session object data
-pub fn open(ca: &mut CaDevice, session_id: u16) -> Result<()> {
+pub fn open(_ca: &mut CaDevice, _session_id: u16) -> Result<()> {
     unimplemented!()
 }
 
 
 /// Close session
-pub fn close(ca: &mut CaDevice, session_id: u16) -> Result<()> {
+pub fn close(_ca: &mut CaDevice, _session_id: u16) -> Result<()> {
     unimplemented!()
 }
 
 
 /// Process CAM responses
-pub fn handle(ca: &mut CaDevice, session_id: u16, msg: &[u8]) -> Result<()> {
+pub fn handle(_ca: &mut CaDevice, _session_id: u16, _msg: &[u8]) -> Result<()> {
     unimplemented!()
 }
 
 
 /// Periodically checks resource status
-pub fn manage(ca: &mut CaDevice, session_id: u16) -> Result<()> {
+pub fn manage(_ca: &mut CaDevice, _session_id: u16) -> Result<()> {
     unimplemented!()
 }

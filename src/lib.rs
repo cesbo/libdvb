@@ -1,17 +1,10 @@
-#[macro_use]
-extern crate anyhow;
-
-
-pub mod ca;
 pub mod fe;
+pub mod ca;
 pub mod net;
-
+pub mod dmx;
+pub mod error;
 
 pub use {
-    ca::{
-        CaDevice,
-    },
-
     fe::{
         FeDevice,
         FeStatus,

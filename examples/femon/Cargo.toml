@@ -1,0 +1,11 @@
+[package]
+name = "femon"
+version = "0.0.0"
+description = "dvb frontend monitor"
+authors = []
+license = ""
+repository = ""
+edition = "2021"
+
+[dependencies]
+libdvb = { path = "../.." }

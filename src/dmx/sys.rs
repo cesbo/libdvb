@@ -1,12 +1,3 @@
-use {
-    crate::ioctl::{
-        IoctlInt,
-        io_none,
-        io_write,
-    },
-};
-
-
 pub use {
     dmx_output::*,
     dmx_input::*,
@@ -119,9 +110,3 @@ pub struct DmxPesFilterParams {
     /// Demux PES flags
     pub flags: u32,
 }
-
-
-pub const DMX_START: IoctlInt = io_none(b'o', 41);
-pub const DMX_STOP: IoctlInt = io_none(b'o', 42);
-pub const DMX_SET_PES_FILTER: IoctlInt = io_write::<DmxPesFilterParams>(b'o', 44);
-pub const DMX_SET_BUFFER_SIZE: IoctlInt = io_none(b'o', 45);

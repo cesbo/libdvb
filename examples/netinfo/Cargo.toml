@@ -1,0 +1,11 @@
+[package]
+name = "netinfo"
+version = "0.0.0"
+description = "dvb network information"
+authors = []
+license = ""
+repository = ""
+edition = "2021"
+
+[dependencies]
+libdvb = { path = "../.." }

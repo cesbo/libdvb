@@ -3,7 +3,7 @@ use {
         fmt,
     },
 
-    anyhow::Result,
+    crate::error::Result,
 
     super::{
         FeDevice,
@@ -211,7 +211,7 @@ impl FeStatus {
     }
 
     fn normalize_signal_strength(&mut self) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[IDX_SIGNAL_STRENGTH].u.st };
+        let stats = unsafe { &mut self.props[IDX_SIGNAL_STRENGTH].u.st };
 
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
@@ -256,7 +256,7 @@ impl FeStatus {
         let delivery_system = self.get_delivery_system();
         let modulation = self.get_modulation();
 
-        let mut stats = unsafe { &mut self.props[IDX_SNR].u.st };
+        let stats = unsafe { &mut self.props[IDX_SNR].u.st };
 
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
@@ -315,7 +315,7 @@ impl FeStatus {
     }
 
     fn normalize_ber(&mut self, fe: &FeDevice) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[IDX_BER].u.st };
+        let stats = unsafe { &mut self.props[IDX_BER].u.st };
 
         if stats.len == 0 {
             stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
@@ -336,7 +336,7 @@ impl FeStatus {
     }
 
     fn normalize_unc(&mut self, fe: &FeDevice) -> Result<()> {
-        let mut stats = unsafe { &mut self.props[IDX_UNC].u.st };
+        let stats = unsafe { &mut self.props[IDX_UNC].u.st };
 
         if stats.len == 0 {
             stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
