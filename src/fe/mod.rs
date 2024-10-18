@@ -399,12 +399,11 @@ impl FeDevice {
     ///
     /// - SEC_TONE_ON - turn 22kHz on
     /// - SEC_TONE_OFF - turn 22kHz off
-    pub fn set_tone(&self, value: nix::libc::c_int) -> Result<()> {
+    pub fn set_tone(&self, value: u32) -> Result<()> {
         // FE_SET_TONE
-        nix::ioctl_write_int!(#[inline] ioctl_call, b'o', 66);
-
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 66));
         unsafe {
-            ioctl_call(self.as_raw_fd(), value)
+            ioctl_call(self.as_raw_fd(), value as _)
         }?;
 
         Ok(())
@@ -428,12 +427,11 @@ impl FeDevice {
     ///     - Left in circular LNB
     /// - OFF is needed with external power supply, for example
     ///   to use same LNB with several receivers.
-    pub fn set_voltage(&self, value: nix::libc::c_int) -> Result<()> {
+    pub fn set_voltage(&self, value: u32) -> Result<()> {
         // FE_SET_VOLTAGE
-        nix::ioctl_write_int!(#[inline] ioctl_call, b'o', 67);
-
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 67));
         unsafe {
-            ioctl_call(self.as_raw_fd(), value)
+            ioctl_call(self.as_raw_fd(), value as _)
         }?;
 
         Ok(())

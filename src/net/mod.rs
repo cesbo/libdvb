@@ -90,7 +90,7 @@ impl NetDevice {
         // NET_REMOVE_IF
         nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 53));
         unsafe {
-            ioctl_call(self.as_raw_fd(), i32::from(interface.if_num))
+            ioctl_call(self.as_raw_fd(), interface.if_num as _)
         }?;
 
         Ok(())

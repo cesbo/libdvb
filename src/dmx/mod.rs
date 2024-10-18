@@ -70,11 +70,11 @@ impl DmxDevice {
     /// Sets the size of the circular buffer used for filtered data.
     /// Recommended to use values that are multiples of 4096 bytes.
     /// The default size is 2 * 4096 bytes.
-    pub fn set_buffer_size(&self, buffer_size: nix::libc::c_int) -> Result<()> {
+    pub fn set_buffer_size(&self, buffer_size: u64) -> Result<()> {
         // DMX_SET_BUFFER_SIZE
-        nix::ioctl_write_int!(#[inline] ioctl_call, b'o', 45);
+        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 45));
         unsafe {
-            ioctl_call(self.as_raw_fd(), buffer_size)
+            ioctl_call(self.as_raw_fd(), buffer_size as _)
         }?;
 
         Ok(())
