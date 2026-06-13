@@ -66,7 +66,7 @@ impl NetDevice {
     }
 
     /// Creates a new network interface and returns interface number
-    pub fn add_if(&self, pid: u16, feedtype: u8) -> Result<NetInterface> {
+    pub fn add_if(&self, pid: u16, feedtype: u8) -> Result<NetInterface<'_>> {
         let mut data = DvbNetIf {
             pid,
             if_num: 0,
