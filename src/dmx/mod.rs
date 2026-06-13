@@ -40,7 +40,7 @@ impl AsRawFd for DmxDevice {
 
 
 impl DmxDevice {
-    /// Attempts to open frontend device in read-write mode
+    /// Attempts to open demux device in read-write mode
     pub fn open(adapter: u32, device: u32) -> Result<Self> {
         let path = format!("/dev/dvb/adapter{}/demux{}", adapter, device);
         let file = OpenOptions::new()

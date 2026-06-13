@@ -240,11 +240,11 @@ impl FeStatus {
             stats.stat[1].scale = FE_SCALE_RELATIVE;
             stats.stat[1].value = {
                 if stats.stat[0].value > hi {
-                    65545
+                    65535
                 } else if stats.stat[0].value < lo {
                     0
                 } else {
-                    65545 * (lo - stats.stat[0].value) / (lo - hi)
+                    65535 * (lo - stats.stat[0].value) / (lo - hi)
                 }
             };
         }

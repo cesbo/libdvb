@@ -138,23 +138,13 @@ impl FeDevice {
 
         self.api_version = cmdseq[0].get_data() as u16;
 
-        // Suppoerted delivery systems
+        // Supported delivery systems
 
         let u_buffer = unsafe { cmdseq[1].u.buffer };
         let u_buffer_len = ::std::cmp::min(u_buffer.len as usize, u_buffer.data.len());
         u_buffer.data[.. u_buffer_len]
             .iter()
             .for_each(|v| self.delivery_system_list.push(*v as u32));
-
-        // dev-file metadata
-
-        let metadata = self.file.metadata()?;
-
-        if !metadata.file_type().is_char_device() {
-            return Err(Error::InvalidProperty(
-                "invalid frontend device path".to_owned()
-            ));
-        }
 
         Ok(())
     }
@@ -166,6 +156,12 @@ impl FeDevice {
             .write(is_write)
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)?;
+
+        if !file.metadata()?.file_type().is_char_device() {
+            return Err(Error::InvalidProperty(
+                format!("{}: not a character device", path)
+            ));
+        }
 
         let mut fe = FeDevice {
             file,
@@ -202,7 +198,7 @@ impl FeDevice {
         for p in cmdseq {
             match p.cmd {
                 DTV_FREQUENCY => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if !self.frequency_range.contains(&v) {
                         return Err(Error::InvalidProperty(
                             "frequency out of range".to_owned()
@@ -210,7 +206,7 @@ impl FeDevice {
                     }
                 }
                 DTV_SYMBOL_RATE => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if !self.symbolrate_range.contains(&v) {
                         return Err(Error::InvalidProperty(
                             "symbolrate out of range".to_owned()
@@ -218,7 +214,7 @@ impl FeDevice {
                     }
                 }
                 DTV_INVERSION => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if v == INVERSION_AUTO && (self.caps & FE_CAN_INVERSION_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
                             "frontend does not support auto inversion".to_owned()
@@ -226,7 +222,7 @@ impl FeDevice {
                     }
                 }
                 DTV_TRANSMISSION_MODE => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if v == TRANSMISSION_MODE_AUTO && (self.caps & FE_CAN_TRANSMISSION_MODE_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
                             "frontend does not support auto transmission mode".to_owned()
@@ -234,7 +230,7 @@ impl FeDevice {
                     }
                 }
                 DTV_GUARD_INTERVAL => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if v == GUARD_INTERVAL_AUTO && (self.caps & FE_CAN_GUARD_INTERVAL_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
                             "frontend does not support auto guard interval".to_owned()
@@ -242,7 +238,7 @@ impl FeDevice {
                     }
                 }
                 DTV_HIERARCHY => {
-                    let v = unsafe { p.u.data };
+                    let v = p.get_data();
                     if v == HIERARCHY_AUTO && (self.caps & FE_CAN_HIERARCHY_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
                             "frontend does not support auto hierarchy".to_owned()

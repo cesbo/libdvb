@@ -131,6 +131,16 @@ fn net() {
 
 
 #[test]
+fn auto_traits() {
+    // The reserved pointer field was changed to `usize` so these stay Send + Sync.
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<DtvProperty>();
+    assert_send_sync::<libdvb::FeStatus>();
+    assert_send_sync::<libdvb::FeDevice>();
+}
+
+
+#[test]
 fn ca() {
     // struct ca_slot_info
     assert_eq!(size_of::<CaSlotInfo>(), 12);

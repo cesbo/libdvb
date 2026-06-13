@@ -13,10 +13,7 @@
 
 use {
     std::{
-        io::{
-            Write,
-            IoSlice,
-        },
+        io::Write,
     },
 
     super::{
@@ -117,13 +114,9 @@ pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
     asn1::encode(data.len() as u16 + 1, &mut header);
     header.push(t_c_id);
 
-    let bufs = &mut [
-        IoSlice::new(&header),
-        IoSlice::new(data),
-    ];
+    header.extend_from_slice(data);
 
-    // TODO: write_all_vectored
-    (&ca.file).write_vectored(bufs)?;
+    (&ca.file).write_all(&header)?;
 
     Ok(())
 }
