@@ -429,13 +429,13 @@ impl TryFrom<u32> for GuardInterval {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransmitMode {
-    Tm2k = 0,
-    Tm8k = 1,
+    Tm2K = 0,
+    Tm8K = 1,
     Auto = 2,
-    Tm4k = 3,
-    Tm1k = 4,
-    Tm16k = 5,
-    Tm32k = 6,
+    Tm4K = 3,
+    Tm1K = 4,
+    Tm16K = 5,
+    Tm32K = 6,
     C1 = 7,
     C3780 = 8,
 }
@@ -446,13 +446,13 @@ impl TryFrom<u32> for TransmitMode {
     #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
-            0 => Ok(TransmitMode::Tm2k),
-            1 => Ok(TransmitMode::Tm8k),
+            0 => Ok(TransmitMode::Tm2K),
+            1 => Ok(TransmitMode::Tm8K),
             2 => Ok(TransmitMode::Auto),
-            3 => Ok(TransmitMode::Tm4k),
-            4 => Ok(TransmitMode::Tm1k),
-            5 => Ok(TransmitMode::Tm16k),
-            6 => Ok(TransmitMode::Tm32k),
+            3 => Ok(TransmitMode::Tm4K),
+            4 => Ok(TransmitMode::Tm1K),
+            5 => Ok(TransmitMode::Tm16K),
+            6 => Ok(TransmitMode::Tm32K),
             7 => Ok(TransmitMode::C1),
             8 => Ok(TransmitMode::C3780),
             _ => Err(Error::InvalidData(format!(
@@ -636,7 +636,7 @@ pub enum Modulation {
     Apsk16 = 10,
     Apsk32 = 11,
     Dqpsk = 12,
-    Qam4nr = 13,
+    Qam4Nr = 13,
     Apsk64 = 14,
     Apsk128 = 15,
     Apsk256 = 16,
@@ -667,7 +667,7 @@ impl TryFrom<u32> for Modulation {
             10 => Modulation::Apsk16,
             11 => Modulation::Apsk32,
             12 => Modulation::Dqpsk,
-            13 => Modulation::Qam4nr,
+            13 => Modulation::Qam4Nr,
             14 => Modulation::Apsk64,
             15 => Modulation::Apsk128,
             16 => Modulation::Apsk256,
