@@ -1,34 +1,26 @@
 pub mod sys;
 
-
-use {
-    std::{
-        fmt,
-        fs::{
-            File,
-            OpenOptions,
-        },
-        io::Read,
-        os::unix::{
-            fs::{
-                OpenOptionsExt,
-            },
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+use std::{
+    fmt,
+    fs::{
+        File,
+        OpenOptions,
+    },
+    io::Read,
+    os::unix::{
+        fs::OpenOptionsExt,
+        io::{
+            AsRawFd,
+            RawFd,
         },
     },
-
-    crate::error::Result,
-
-    self::sys::*,
 };
 
+use self::sys::*;
+use crate::error::Result;
 
 pub const EMPTY_MAC: &str = "00:00:00:00:00:00";
 const MAC_SIZE: usize = EMPTY_MAC.len();
-
 
 /// A reference to the network device
 #[derive(Debug)]
@@ -39,12 +31,12 @@ pub struct NetDevice {
     file: File,
 }
 
-
 impl AsRawFd for NetDevice {
     #[inline]
-    fn as_raw_fd(&self) -> RawFd { self.file.as_raw_fd() }
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
 }
-
 
 impl NetDevice {
     /// Attempts to open a network device in read-write mode
@@ -74,10 +66,14 @@ impl NetDevice {
         };
 
         // NET_ADD_IF
-        nix::ioctl_readwrite!(#[inline] ioctl_call, b'o', 52, DvbNetIf);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut data as *mut _)
-        }?;
+        nix::ioctl_readwrite!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            52,
+            DvbNetIf
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut data as *mut _) }?;
 
         Ok(NetInterface {
             net: self,
@@ -88,32 +84,35 @@ impl NetDevice {
     /// Removes a network interface
     pub fn remove_if(&self, interface: NetInterface) -> Result<()> {
         // NET_REMOVE_IF
-        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 53));
-        unsafe {
-            ioctl_call(self.as_raw_fd(), interface.if_num as _)
-        }?;
+        nix::ioctl_write_int_bad!(
+            #[inline]
+            ioctl_call,
+            nix::request_code_none!(b'o', 53)
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), interface.if_num as _) }?;
 
         Ok(())
     }
 }
-
 
 pub struct NetInterface<'a> {
     net: &'a NetDevice,
     if_num: u16,
 }
 
-
 impl<'a> fmt::Display for NetInterface<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.net.device == 0 {
             write!(f, "dvb{}_{}", self.net.adapter, self.if_num)
         } else {
-            write!(f, "dvb{}{}{}", self.net.adapter, self.net.device, self.if_num)
+            write!(
+                f,
+                "dvb{}{}{}",
+                self.net.adapter, self.net.device, self.if_num
+            )
         }
     }
 }
-
 
 impl<'a> NetInterface<'a> {
     /// Returns interface mac address or empty mac on any error
@@ -125,9 +124,7 @@ impl<'a> NetInterface<'a> {
         };
 
         let mut mac = String::with_capacity(MAC_SIZE);
-        let result = file
-            .take(MAC_SIZE as u64)
-            .read_to_string(&mut mac);
+        let result = file.take(MAC_SIZE as u64).read_to_string(&mut mac);
 
         match result {
             Ok(MAC_SIZE) => mac,

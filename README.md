@@ -55,3 +55,9 @@ let mut status = FeStatus::default();
 status.read(&fe)?;
 println!("{}", &status);
 ```
+
+## Code Formatting
+
+```
+rustfmt --config "group_imports=StdExternalCrate,imports_granularity=Crate,imports_layout=Vertical,newline_style=Unix,spaces_around_ranges=true,struct_lit_single_line=true,use_field_init_shorthand=true"
+```

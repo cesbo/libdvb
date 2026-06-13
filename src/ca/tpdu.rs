@@ -10,48 +10,36 @@
 //! The module cannot initiate communication: it must wait for the host to
 //! poll it or send it data first.
 
+use std::io::Write;
 
-use {
-    std::{
-        io::Write,
-    },
+pub use ca_tpdu_tag::*;
 
-    super::{
-        asn1,
-        CaDevice,
-        spdu,
-    },
-
-    crate::error::{
-        Error,
-        Result,
-    },
+use super::{
+    asn1,
+    spdu,
+    CaDevice,
 };
-
-
-pub use {
-    ca_tpdu_tag::*,
+use crate::error::{
+    Error,
+    Result,
 };
-
 
 pub const TPDU_SIZE_MAX: usize = 2048;
 
-
 /// en50221 A.4.1.13: List of transport tags
 mod ca_tpdu_tag {
-    pub const TT_SB: u8                             = 0x80;
-    pub const TT_RCV: u8                            = 0x81;
-    pub const TT_CREATE_TC: u8                      = 0x82;
-    pub const TT_CTC_REPLY: u8                      = 0x83;
-    pub const TT_DELETE_TC: u8                      = 0x84;
-    pub const TT_DTC_REPLY: u8                      = 0x85;
-    pub const TT_REQUEST_TC: u8                     = 0x86;
-    pub const TT_NEW_TC: u8                         = 0x87;
-    pub const TT_TC_ERROR: u8                       = 0x88;
-    pub const TT_DATA_LAST: u8                      = 0xA0;
-    pub const TT_DATA_MORE: u8                      = 0xA1;
+    pub const TT_SB: u8 = 0x80;
+    pub const TT_RCV: u8 = 0x81;
+    pub const TT_CREATE_TC: u8 = 0x82;
+    pub const TT_CTC_REPLY: u8 = 0x83;
+    pub const TT_DELETE_TC: u8 = 0x84;
+    pub const TT_DTC_REPLY: u8 = 0x85;
+    pub const TT_REQUEST_TC: u8 = 0x86;
+    pub const TT_NEW_TC: u8 = 0x87;
+    pub const TT_TC_ERROR: u8 = 0x88;
+    pub const TT_DATA_LAST: u8 = 0xA0;
+    pub const TT_DATA_MORE: u8 = 0xA1;
 }
-
 
 pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
     // TODO: read packet
@@ -60,8 +48,13 @@ pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
         return Err(Error::InvalidData("invalid ca tpdu packet size".to_owned()));
     }
 
-    if data[1] == 0 /* TODO: || data[1] > ca.slots.len() */ {
-        return Err(Error::InvalidData(format!("invalid ca tpdu slot id {}", data[1])));
+    if data[1] == 0
+    /* TODO: || data[1] > ca.slots.len() */
+    {
+        return Err(Error::InvalidData(format!(
+            "invalid ca tpdu slot id {}",
+            data[1]
+        )));
     }
 
     let slot_id = data[1] - 1;
@@ -87,13 +80,15 @@ pub fn _read(ca: &mut CaDevice, data: &[u8]) -> Result<()> {
 
         TT_SB => {}
         _ => {
-            return Err(Error::InvalidData(format!("invalid ca tpdu tag 0x{:02X}", tag)));
+            return Err(Error::InvalidData(format!(
+                "invalid ca tpdu tag 0x{:02X}",
+                tag
+            )));
         }
     }
 
     Ok(())
 }
-
 
 /// Writes TPDU to the CA device
 pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
@@ -120,7 +115,6 @@ pub fn send(ca: &CaDevice, slot_id: u8, tag: u8, data: &[u8]) -> Result<()> {
 
     Ok(())
 }
-
 
 /// Init transport layer for slot
 pub fn init(ca: &CaDevice, slot_id: u8) -> Result<()> {

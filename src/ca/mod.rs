@@ -1,40 +1,34 @@
 #![allow(dead_code)]
 
-mod asn1;
-mod tpdu;
-mod spdu;
 mod apdu;
+mod asn1;
+mod spdu;
 pub mod sys;
+mod tpdu;
 
-
-use {
-    std::{
-        fs::{
-            File,
-            OpenOptions,
-        },
-        os::unix::{
-            fs::OpenOptionsExt,
-            io::{
-                AsRawFd,
-                RawFd,
-            },
-        },
-        time::Duration,
-        thread,
+use std::{
+    fs::{
+        File,
+        OpenOptions,
     },
-
-    crate::error::{
-        Error,
-        Result,
+    os::unix::{
+        fs::OpenOptionsExt,
+        io::{
+            AsRawFd,
+            RawFd,
+        },
     },
-
-    self::sys::*,
+    thread,
+    time::Duration,
 };
 
+use self::sys::*;
+use crate::error::{
+    Error,
+    Result,
+};
 
 const CA_DELAY: Duration = Duration::from_millis(100);
-
 
 #[derive(Debug)]
 pub struct CaDevice {
@@ -45,22 +39,25 @@ pub struct CaDevice {
     slot: CaSlotInfo,
 }
 
-
 impl AsRawFd for CaDevice {
     #[inline]
-    fn as_raw_fd(&self) -> RawFd { self.file.as_raw_fd() }
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
 }
-
 
 impl CaDevice {
     /// Sends reset command to CA device
     #[inline]
     pub fn reset(&mut self) -> Result<()> {
         // CA_RESET
-        nix::ioctl_none!(#[inline] ca_reset, b'o', 128);
-        unsafe {
-            ca_reset(self.as_raw_fd())
-        }?;
+        nix::ioctl_none!(
+            #[inline]
+            ca_reset,
+            b'o',
+            128
+        );
+        unsafe { ca_reset(self.as_raw_fd()) }?;
 
         Ok(())
     }
@@ -69,10 +66,14 @@ impl CaDevice {
     #[inline]
     pub fn get_caps(&self, caps: &mut CaCaps) -> Result<()> {
         // CA_GET_CAP
-        nix::ioctl_read!(#[inline] ca_get_cap, b'o', 129, CaCaps);
-        unsafe {
-            ca_get_cap(self.as_raw_fd(), caps as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ca_get_cap,
+            b'o',
+            129,
+            CaCaps
+        );
+        unsafe { ca_get_cap(self.as_raw_fd(), caps as *mut _) }?;
 
         Ok(())
     }
@@ -81,10 +82,14 @@ impl CaDevice {
     #[inline]
     pub fn get_slot_info(&mut self) -> Result<()> {
         // CA_GET_SLOT_INFO
-        nix::ioctl_read!(#[inline] ca_get_slot_info, b'o', 130, CaSlotInfo);
-        unsafe {
-            ca_get_slot_info(self.as_raw_fd(), &mut self.slot as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ca_get_slot_info,
+            b'o',
+            130,
+            CaSlotInfo
+        );
+        unsafe { ca_get_slot_info(self.as_raw_fd(), &mut self.slot as *mut _) }?;
 
         Ok(())
     }
@@ -130,7 +135,9 @@ impl CaDevice {
         ca.get_slot_info()?;
 
         if ca.slot.slot_type != CA_CI_LINK {
-            return Err(Error::InvalidProperty("incompatible ca interface".to_owned()));
+            return Err(Error::InvalidProperty(
+                "incompatible ca interface".to_owned(),
+            ));
         }
 
         // reset flags
@@ -149,7 +156,7 @@ impl CaDevice {
                 if flags == CA_CI_MODULE_READY {
                     // TODO: de-init
                 }
-                return Ok(())
+                return Ok(());
             }
             CA_CI_MODULE_READY => {
                 if flags != CA_CI_MODULE_READY {
@@ -160,7 +167,9 @@ impl CaDevice {
                 return Err(Error::InvalidData("ca module not found".to_owned()));
             }
             _ => {
-                return Err(Error::InvalidData("ca module invalid slot flags".to_owned()));
+                return Err(Error::InvalidData(
+                    "ca module invalid slot flags".to_owned(),
+                ));
             }
         };
 

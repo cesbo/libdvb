@@ -1,10 +1,7 @@
-use {
-    libdvb::{
-        FeDevice,
-        FeStatus,
-    },
+use libdvb::{
+    FeDevice,
+    FeStatus,
 };
-
 
 fn main() {
     let mut args = std::env::args().skip(1);

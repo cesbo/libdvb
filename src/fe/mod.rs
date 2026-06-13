@@ -1,41 +1,33 @@
 mod status;
 pub mod sys;
 
-
-use {
-    std::{
-        ffi::CStr,
-        fmt,
+use std::{
+    ffi::CStr,
+    fmt,
+    fs::{
+        File,
+        OpenOptions,
+    },
+    ops::Range,
+    os::unix::{
         fs::{
-            File,
-            OpenOptions,
+            FileTypeExt,
+            OpenOptionsExt,
         },
-        ops::Range,
-        os::unix::{
-            fs::{
-                OpenOptionsExt,
-                FileTypeExt,
-            },
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+        io::{
+            AsRawFd,
+            RawFd,
         },
     },
-
-    crate::error::{
-        Error,
-        Result,
-    },
-
-    self::sys::*,
 };
 
+pub use status::FeStatus;
 
-pub use {
-    status::FeStatus,
+use self::sys::*;
+use crate::error::{
+    Error,
+    Result,
 };
-
 
 /// A reference to the frontend device and device information
 #[derive(Debug)]
@@ -51,10 +43,14 @@ pub struct FeDevice {
     caps: u32,
 }
 
-
 impl fmt::Display for FeDevice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "DVB API: {}.{}", self.api_version >> 8, self.api_version & 0xFF)?;
+        writeln!(
+            f,
+            "DVB API: {}.{}",
+            self.api_version >> 8,
+            self.api_version & 0xFF
+        )?;
         writeln!(f, "Frontend: {}", self.name)?;
 
         write!(f, "Delivery system:")?;
@@ -63,13 +59,19 @@ impl fmt::Display for FeDevice {
         }
         writeln!(f, "")?;
 
-        writeln!(f, "Frequency range: {} .. {}",
+        writeln!(
+            f,
+            "Frequency range: {} .. {}",
             self.frequency_range.start / 1000,
-            self.frequency_range.end / 1000)?;
+            self.frequency_range.end / 1000
+        )?;
 
-        writeln!(f, "Symbolrate range: {} .. {}",
+        writeln!(
+            f,
+            "Symbolrate range: {} .. {}",
             self.symbolrate_range.start / 1000,
-            self.symbolrate_range.end / 1000)?;
+            self.symbolrate_range.end / 1000
+        )?;
 
         write!(f, "Frontend capabilities: 0x{:08x}", self.caps)?;
 
@@ -77,12 +79,12 @@ impl fmt::Display for FeDevice {
     }
 }
 
-
 impl AsRawFd for FeDevice {
     #[inline]
-    fn as_raw_fd(&self) -> RawFd { self.file.as_raw_fd() }
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
 }
-
 
 impl FeDevice {
     /// Clears frontend settings and event queue
@@ -109,10 +111,14 @@ impl FeDevice {
         let mut feinfo = FeInfo::default();
 
         // FE_GET_INFO
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 61, FeInfo);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            61,
+            FeInfo
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _) }?;
 
         if let Some(len) = feinfo.name.iter().position(|&b| b == 0) {
             let name = unsafe { CStr::from_ptr(feinfo.name[.. len + 1].as_ptr()) };
@@ -158,9 +164,10 @@ impl FeDevice {
             .open(&path)?;
 
         if !file.metadata()?.file_type().is_char_device() {
-            return Err(Error::InvalidProperty(
-                format!("{}: not a character device", path)
-            ));
+            return Err(Error::InvalidProperty(format!(
+                "{}: not a character device",
+                path
+            )));
         }
 
         let mut fe = FeDevice {
@@ -182,15 +189,13 @@ impl FeDevice {
 
     /// Attempts to open frontend device in read-only mode
     #[inline]
-    pub fn open_ro(adapter: u32, device: u32) -> Result<FeDevice>
-    {
+    pub fn open_ro(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, false)
     }
 
     /// Attempts to open frontend device in read-write mode
     #[inline]
-    pub fn open_rw(adapter: u32, device: u32) -> Result<FeDevice>
-    {
+    pub fn open_rw(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, true)
     }
 
@@ -200,32 +205,30 @@ impl FeDevice {
                 DTV_FREQUENCY => {
                     let v = p.get_data();
                     if !self.frequency_range.contains(&v) {
-                        return Err(Error::InvalidProperty(
-                            "frequency out of range".to_owned()
-                        ));
+                        return Err(Error::InvalidProperty("frequency out of range".to_owned()));
                     }
                 }
                 DTV_SYMBOL_RATE => {
                     let v = p.get_data();
                     if !self.symbolrate_range.contains(&v) {
-                        return Err(Error::InvalidProperty(
-                            "symbolrate out of range".to_owned()
-                        ));
+                        return Err(Error::InvalidProperty("symbolrate out of range".to_owned()));
                     }
                 }
                 DTV_INVERSION => {
                     let v = p.get_data();
                     if v == INVERSION_AUTO && (self.caps & FE_CAN_INVERSION_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
-                            "frontend does not support auto inversion".to_owned()
+                            "frontend does not support auto inversion".to_owned(),
                         ));
                     }
                 }
                 DTV_TRANSMISSION_MODE => {
                     let v = p.get_data();
-                    if v == TRANSMISSION_MODE_AUTO && (self.caps & FE_CAN_TRANSMISSION_MODE_AUTO) == 0 {
+                    if v == TRANSMISSION_MODE_AUTO
+                        && (self.caps & FE_CAN_TRANSMISSION_MODE_AUTO) == 0
+                    {
                         return Err(Error::InvalidProperty(
-                            "frontend does not support auto transmission mode".to_owned()
+                            "frontend does not support auto transmission mode".to_owned(),
                         ));
                     }
                 }
@@ -233,7 +236,7 @@ impl FeDevice {
                     let v = p.get_data();
                     if v == GUARD_INTERVAL_AUTO && (self.caps & FE_CAN_GUARD_INTERVAL_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
-                            "frontend does not support auto guard interval".to_owned()
+                            "frontend does not support auto guard interval".to_owned(),
                         ));
                     }
                 }
@@ -241,14 +244,14 @@ impl FeDevice {
                     let v = p.get_data();
                     if v == HIERARCHY_AUTO && (self.caps & FE_CAN_HIERARCHY_AUTO) == 0 {
                         return Err(Error::InvalidProperty(
-                            "frontend does not support auto hierarchy".to_owned()
+                            "frontend does not support auto hierarchy".to_owned(),
                         ));
                     }
                 }
                 DTV_STREAM_ID => {
                     if (self.caps & FE_CAN_MULTISTREAM) == 0 {
                         return Err(Error::InvalidProperty(
-                            "frontend does not support multistream".to_owned()
+                            "frontend does not support multistream".to_owned(),
                         ));
                     }
                 }
@@ -275,10 +278,14 @@ impl FeDevice {
         };
 
         // FE_SET_PROPERTY
-        nix::ioctl_write_ptr!(#[inline] ioctl_call, b'o', 82, DtvProperties);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }?;
+        nix::ioctl_write_ptr!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            82,
+            DtvProperties
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &cmd as *const _) }?;
 
         Ok(())
     }
@@ -297,10 +304,14 @@ impl FeDevice {
         };
 
         // FE_GET_PROPERTY
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 83, DtvProperties);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut cmd as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            83,
+            DtvProperties
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut cmd as *mut _) }?;
 
         Ok(())
     }
@@ -308,10 +319,14 @@ impl FeDevice {
     /// Returns a frontend events if available
     pub fn get_event(&self, event: &mut FeEvent) -> Result<()> {
         // FE_GET_EVENT
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 78, FeEvent);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), event as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            78,
+            FeEvent
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), event as *mut _) }?;
 
         Ok(())
     }
@@ -329,10 +344,14 @@ impl FeDevice {
         let mut result: u32 = FE_NONE;
 
         // FE_READ_STATUS
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 69, u32);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            69,
+            u32
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut result as *mut _) }?;
 
         Ok(result)
     }
@@ -342,10 +361,14 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SIGNAL_STRENGTH
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 71, u16);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            71,
+            u16
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut result as *mut _) }?;
 
         Ok(result)
     }
@@ -355,10 +378,14 @@ impl FeDevice {
         let mut result: u16 = 0;
 
         // FE_READ_SNR
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 72, u16);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            72,
+            u16
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut result as *mut _) }?;
 
         Ok(result)
     }
@@ -368,10 +395,14 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_BER
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 70, u32);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            70,
+            u32
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut result as *mut _) }?;
 
         Ok(result)
     }
@@ -381,10 +412,14 @@ impl FeDevice {
         let mut result: u32 = 0;
 
         // FE_READ_UNCORRECTED_BLOCKS
-        nix::ioctl_read!(#[inline] ioctl_call, b'o', 73, u32);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &mut result as *mut _)
-        }?;
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            73,
+            u32
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), &mut result as *mut _) }?;
 
         Ok(result)
     }
@@ -397,10 +432,12 @@ impl FeDevice {
     /// - SEC_TONE_OFF - turn 22kHz off
     pub fn set_tone(&self, value: u32) -> Result<()> {
         // FE_SET_TONE
-        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 66));
-        unsafe {
-            ioctl_call(self.as_raw_fd(), value as _)
-        }?;
+        nix::ioctl_write_int_bad!(
+            #[inline]
+            ioctl_call,
+            nix::request_code_none!(b'o', 66)
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), value as _) }?;
 
         Ok(())
     }
@@ -425,10 +462,12 @@ impl FeDevice {
     ///   to use same LNB with several receivers.
     pub fn set_voltage(&self, value: u32) -> Result<()> {
         // FE_SET_VOLTAGE
-        nix::ioctl_write_int_bad!(#[inline] ioctl_call, nix::request_code_none!(b'o', 67));
-        unsafe {
-            ioctl_call(self.as_raw_fd(), value as _)
-        }?;
+        nix::ioctl_write_int_bad!(
+            #[inline]
+            ioctl_call,
+            nix::request_code_none!(b'o', 67)
+        );
+        unsafe { ioctl_call(self.as_raw_fd(), value as _) }?;
 
         Ok(())
     }
@@ -460,9 +499,7 @@ impl FeDevice {
 
         // FE_DISEQC_SEND_MASTER_CMD
         nix::ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
-        unsafe {
-            ioctl_call(self.as_raw_fd(), &cmd as *const _)
-        }?;
+        unsafe { ioctl_call(self.as_raw_fd(), &cmd as *const _) }?;
 
         Ok(())
     }

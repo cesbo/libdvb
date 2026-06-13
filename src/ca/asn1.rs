@@ -1,6 +1,5 @@
 const SIZE_INDICATOR: u8 = 0x80;
 
-
 pub fn encode(value: u16, out: &mut Vec<u8>) {
     if value < SIZE_INDICATOR as _ {
         out.push(value as u8);

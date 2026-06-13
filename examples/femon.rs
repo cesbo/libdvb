@@ -1,17 +1,14 @@
-use {
-    std::{
-        time::Duration,
-        thread,
-    },
-
-    libdvb::{
-        FeDevice,
-        FeStatus,
-    },
+use std::{
+    thread,
+    time::Duration,
 };
 
+use libdvb::{
+    FeDevice,
+    FeStatus,
+};
 
-fn main()  {
+fn main() {
     let mut args = std::env::args().skip(1);
 
     let adapter = match args.next() {
