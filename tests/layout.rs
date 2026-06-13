@@ -25,9 +25,9 @@ use {
             DiseqcMasterCmd,
             DiseqcSlaveReply,
             DtvFrontendStats,
-            DtvProperty,
             DtvPropertyBuffer,
             DtvPropertyData,
+            DtvPropertyRaw,
             DtvStats,
             FeEvent,
             FeInfo,
@@ -94,11 +94,11 @@ fn fe_property() {
     assert_eq!(size_of::<DtvPropertyData>(), DTV_PROPERTY_DATA_SIZE);
 
     // struct dtv_property (packed)
-    assert_eq!(size_of::<DtvProperty>(), DTV_PROPERTY_SIZE);
-    assert_eq!(align_of::<DtvProperty>(), 1);
-    assert_eq!(offset_of!(DtvProperty, cmd), 0);
-    assert_eq!(offset_of!(DtvProperty, u), 16);
-    assert_eq!(offset_of!(DtvProperty, result), 16 + DTV_PROPERTY_DATA_SIZE);
+    assert_eq!(size_of::<DtvPropertyRaw>(), DTV_PROPERTY_SIZE);
+    assert_eq!(align_of::<DtvPropertyRaw>(), 1);
+    assert_eq!(offset_of!(DtvPropertyRaw, cmd), 0);
+    assert_eq!(offset_of!(DtvPropertyRaw, u), 16);
+    assert_eq!(offset_of!(DtvPropertyRaw, result), 16 + DTV_PROPERTY_DATA_SIZE);
 }
 
 
@@ -134,7 +134,7 @@ fn net() {
 fn auto_traits() {
     // The reserved pointer field was changed to `usize` so these stay Send + Sync.
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<DtvProperty>();
+    assert_send_sync::<DtvPropertyRaw>();
     assert_send_sync::<libdvb::FeStatus>();
     assert_send_sync::<libdvb::FeDevice>();
 }

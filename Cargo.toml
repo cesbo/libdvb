@@ -12,5 +12,6 @@ categories = ["api-bindings", "hardware-support"]
 edition = "2024"
 
 [dependencies]
+bitflags = "2"
 nix = { version = "0.31", features = ["ioctl"] }
 thiserror = "2"

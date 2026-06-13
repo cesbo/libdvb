@@ -3,89 +3,87 @@ use std::{
     mem,
 };
 
+use bitflags::bitflags;
 pub use dtv_property_cmd::*;
-pub use fe_caps::*;
-pub use fe_code_rate::*;
-pub use fe_delivery_system::*;
-pub use fe_guard_interval::*;
-pub use fe_hierarchy::*;
-pub use fe_interleaving::*;
-pub use fe_modulation::*;
-pub use fe_pilot::*;
-pub use fe_rolloff::*;
-pub use fe_sec_mini_cmd::*;
-pub use fe_sec_tone_mode::*;
-pub use fe_sec_voltage::*;
-pub use fe_spectral_inversion::*;
-pub use fe_status::*;
-pub use fe_transmit_mode::*;
 pub use fe_type::*;
 pub use fecap_scale_params::*;
 
-/// Frontend capabilities
-mod fe_caps {
+use crate::error::{
+    Error,
+    Result,
+};
+
+bitflags! {
+    /// Frontend capabilities
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FeCaps: u32 {
+        /// Can auto-detect frequency spectral band inversion
+        const CAN_INVERSION_AUTO = 0x1;
+        /// Supports FEC 1/2
+        const CAN_FEC_1_2 = 0x2;
+        /// Supports FEC 2/3
+        const CAN_FEC_2_3 = 0x4;
+        /// Supports FEC 3/4
+        const CAN_FEC_3_4 = 0x8;
+        /// Supports FEC 4/5
+        const CAN_FEC_4_5 = 0x10;
+        /// Supports FEC 5/6
+        const CAN_FEC_5_6 = 0x20;
+        /// Supports FEC 6/7
+        const CAN_FEC_6_7 = 0x40;
+        /// Supports FEC 7/8
+        const CAN_FEC_7_8 = 0x80;
+        /// Supports FEC 8/9
+        const CAN_FEC_8_9 = 0x100;
+        /// Can auto-detect FEC
+        const CAN_FEC_AUTO = 0x200;
+        /// Supports QPSK modulation
+        const CAN_QPSK = 0x400;
+        /// Supports 16-QAM modulation
+        const CAN_QAM_16 = 0x800;
+        /// Supports 32-QAM modulation
+        const CAN_QAM_32 = 0x1000;
+        /// Supports 64-QAM modulation
+        const CAN_QAM_64 = 0x2000;
+        /// Supports 128-QAM modulation
+        const CAN_QAM_128 = 0x4000;
+        /// Supports 256-QAM modulation
+        const CAN_QAM_256 = 0x8000;
+        /// Can auto-detect QAM modulation
+        const CAN_QAM_AUTO = 0x10000;
+        /// Can auto-detect transmission mode
+        const CAN_TRANSMISSION_MODE_AUTO = 0x20000;
+        /// Can auto-detect bandwidth
+        const CAN_BANDWIDTH_AUTO = 0x40000;
+        /// Can auto-detect guard interval
+        const CAN_GUARD_INTERVAL_AUTO = 0x80000;
+        /// Can auto-detect hierarchy
+        const CAN_HIERARCHY_AUTO = 0x100000;
+        /// Supports 8-VSB modulation
+        const CAN_8VSB = 0x200000;
+        /// Supports 16-VSB modulation
+        const CAN_16VSB = 0x400000;
+        /// Unused
+        const HAS_EXTENDED_CAPS = 0x800000;
+        /// Supports multistream filtering
+        const CAN_MULTISTREAM = 0x4000000;
+        /// Supports "turbo FEC" modulation
+        const CAN_TURBO_FEC = 0x8000000;
+        /// Supports "2nd generation" modulation, e. g. DVB-S2, DVB-T2, DVB-C2
+        const CAN_2G_MODULATION = 0x10000000;
+        /// Unused
+        const NEEDS_BENDING = 0x20000000;
+        /// Can recover from a cable unplug automatically
+        const CAN_RECOVER = 0x40000000;
+        /// Can stop spurious TS data output
+        const CAN_MUTE_TS = 0x80000000;
+    }
+}
+
+impl FeCaps {
     /// There's something wrong at the frontend, and it can't report its capabilities
-    pub const FE_IS_STUPID: u32 = 0;
-    /// Can auto-detect frequency spectral band inversion
-    pub const FE_CAN_INVERSION_AUTO: u32 = 0x1;
-    /// Supports FEC 1/2
-    pub const FE_CAN_FEC_1_2: u32 = 0x2;
-    /// Supports FEC 2/3
-    pub const FE_CAN_FEC_2_3: u32 = 0x4;
-    /// Supports FEC 3/4
-    pub const FE_CAN_FEC_3_4: u32 = 0x8;
-    /// Supports FEC 4/5
-    pub const FE_CAN_FEC_4_5: u32 = 0x10;
-    /// Supports FEC 5/6
-    pub const FE_CAN_FEC_5_6: u32 = 0x20;
-    /// Supports FEC 6/7
-    pub const FE_CAN_FEC_6_7: u32 = 0x40;
-    /// Supports FEC 7/8
-    pub const FE_CAN_FEC_7_8: u32 = 0x80;
-    /// Supports FEC 8/9
-    pub const FE_CAN_FEC_8_9: u32 = 0x100;
-    /// Can auto-detect FEC
-    pub const FE_CAN_FEC_AUTO: u32 = 0x200;
-    /// Supports QPSK modulation
-    pub const FE_CAN_QPSK: u32 = 0x400;
-    /// Supports 16-QAM modulation
-    pub const FE_CAN_QAM_16: u32 = 0x800;
-    /// Supports 32-QAM modulation
-    pub const FE_CAN_QAM_32: u32 = 0x1000;
-    /// Supports 64-QAM modulation
-    pub const FE_CAN_QAM_64: u32 = 0x2000;
-    /// Supports 128-QAM modulation
-    pub const FE_CAN_QAM_128: u32 = 0x4000;
-    /// Supports 256-QAM modulation
-    pub const FE_CAN_QAM_256: u32 = 0x8000;
-    /// Can auto-detect QAM modulation
-    pub const FE_CAN_QAM_AUTO: u32 = 0x10000;
-    /// Can auto-detect transmission mode
-    pub const FE_CAN_TRANSMISSION_MODE_AUTO: u32 = 0x20000;
-    /// Can auto-detect bandwidth
-    pub const FE_CAN_BANDWIDTH_AUTO: u32 = 0x40000;
-    /// Can auto-detect guard interval
-    pub const FE_CAN_GUARD_INTERVAL_AUTO: u32 = 0x80000;
-    /// Can auto-detect hierarchy
-    pub const FE_CAN_HIERARCHY_AUTO: u32 = 0x100000;
-    /// Supports 8-VSB modulation
-    pub const FE_CAN_8VSB: u32 = 0x200000;
-    /// Supports 16-VSB modulation
-    pub const FE_CAN_16VSB: u32 = 0x400000;
-    /// Unused
-    pub const FE_HAS_EXTENDED_CAPS: u32 = 0x800000;
-    /// Supports multistream filtering
-    pub const FE_CAN_MULTISTREAM: u32 = 0x4000000;
-    /// Supports "turbo FEC" modulation
-    pub const FE_CAN_TURBO_FEC: u32 = 0x8000000;
-    /// Supports "2nd generation" modulation, e. g. DVB-S2, DVB-T2, DVB-C2
-    pub const FE_CAN_2G_MODULATION: u32 = 0x10000000;
-    /// Unused
-    pub const FE_NEEDS_BENDING: u32 = 0x20000000;
-    /// Can recover from a cable unplug automatically
-    pub const FE_CAN_RECOVER: u32 = 0x40000000;
-    /// Can stop spurious TS data output
-    pub const FE_CAN_MUTE_TS: u32 = 0x80000000;
+    /// (`FE_IS_STUPID`, the empty set).
+    pub const IS_STUPID: Self = Self::empty();
 }
 
 /// DEPRECATED: Should be kept just due to backward compatibility
@@ -184,209 +182,562 @@ impl Default for DiseqcSlaveReply {
     }
 }
 
-/// DC Voltage used to feed the LNBf
-mod fe_sec_voltage {
-    /// Output 13V to the LNB. Vertical linear. Right circular.
-    pub const SEC_VOLTAGE_13: u32 = 0;
-    /// Output 18V to the LNB. Horizontal linear. Left circular.
-    pub const SEC_VOLTAGE_18: u32 = 1;
-    /// Don't feed the LNB with a DC voltage
-    pub const SEC_VOLTAGE_OFF: u32 = 2;
+bitflags! {
+    /// Enumerates the possible frontend status
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FeStatusFlags: u32 {
+        /// Has found something above the noise level
+        const HAS_SIGNAL = 0x01;
+        /// Has found a signal
+        const HAS_CARRIER = 0x02;
+        /// FEC inner coding (Viterbi, LDPC or other inner code) is stable.
+        const HAS_VITERBI = 0x04;
+        /// Synchronization bytes was found
+        const HAS_SYNC = 0x08;
+        /// Digital TV were locked and everything is working
+        const HAS_LOCK = 0x10;
+        /// Fo lock within the last about 2 seconds
+        const TIMEDOUT = 0x20;
+        /// Frontend was reinitialized, application is recommended
+        /// to reset DiSEqC, tone and parameters
+        const REINIT = 0x40;
+    }
 }
 
-mod fe_sec_tone_mode {
+impl FeStatusFlags {
+    /// The frontend doesn't have any kind of lock. That's the initial frontend
+    /// status (`FE_NONE`, the empty set).
+    pub const NONE: Self = Self::empty();
+}
+
+/// DC Voltage used to feed the LNBf
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecVoltage {
+    /// Output 13V to the LNB. Vertical linear. Right circular.
+    V13 = 0,
+    /// Output 18V to the LNB. Horizontal linear. Left circular.
+    V18 = 1,
+    /// Don't feed the LNB with a DC voltage
+    Off = 2,
+}
+
+impl TryFrom<u32> for SecVoltage {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(SecVoltage::V13),
+            1 => Ok(SecVoltage::V18),
+            2 => Ok(SecVoltage::Off),
+            _ => Err(Error::InvalidData(format!(
+                "invalid SecVoltage value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// SEC tone mode
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecTone {
     /// Sends a 22kHz tone burst to the antenna
-    pub const SEC_TONE_ON: u32 = 0;
+    On = 0,
     /// Don't send a 22kHz tone to the antenna (except if the FE_DISEQC_* ioctl are called)
-    pub const SEC_TONE_OFF: u32 = 1;
+    Off = 1,
+}
+
+impl TryFrom<u32> for SecTone {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(SecTone::On),
+            1 => Ok(SecTone::Off),
+            _ => Err(Error::InvalidData(format!(
+                "invalid SecTone value: {}",
+                value
+            ))),
+        }
+    }
 }
 
 /// Type of mini burst to be sent
-mod fe_sec_mini_cmd {
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecMiniCmd {
     /// Sends a mini-DiSEqC 22kHz '0' Tone Burst to select satellite-A
-    pub const SEC_MINI_A: u32 = 0;
+    A = 0,
     /// Sends a mini-DiSEqC 22kHz '1' Data Burst to select satellite-B
-    pub const SEC_MINI_B: u32 = 1;
+    B = 1,
 }
 
-/// Enumerates the possible frontend status
-mod fe_status {
-    /// The frontend doesn't have any kind of lock. That's the initial frontend status
-    pub const FE_NONE: u32 = 0x00;
-    /// Has found something above the noise level
-    pub const FE_HAS_SIGNAL: u32 = 0x01;
-    /// Has found a signal
-    pub const FE_HAS_CARRIER: u32 = 0x02;
-    /// FEC inner coding (Viterbi, LDPC or other inner code) is stable.
-    pub const FE_HAS_VITERBI: u32 = 0x04;
-    /// Synchronization bytes was found
-    pub const FE_HAS_SYNC: u32 = 0x08;
-    /// Digital TV were locked and everything is working
-    pub const FE_HAS_LOCK: u32 = 0x10;
-    /// Fo lock within the last about 2 seconds
-    pub const FE_TIMEDOUT: u32 = 0x20;
-    /// Frontend was reinitialized, application is recommended
-    /// to reset DiSEqC, tone and parameters
-    pub const FE_REINIT: u32 = 0x40;
+impl TryFrom<u32> for SecMiniCmd {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(SecMiniCmd::A),
+            1 => Ok(SecMiniCmd::B),
+            _ => Err(Error::InvalidData(format!(
+                "invalid SecMiniCmd value: {}",
+                value
+            ))),
+        }
+    }
 }
 
 /// Spectral band inversion
-mod fe_spectral_inversion {
-    pub const INVERSION_OFF: u32 = 0;
-    pub const INVERSION_ON: u32 = 1;
-    pub const INVERSION_AUTO: u32 = 2;
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Inversion {
+    Off = 0,
+    On = 1,
+    Auto = 2,
 }
 
-mod fe_code_rate {
-    pub const FEC_NONE: u32 = 0;
-    pub const FEC_1_2: u32 = 1;
-    pub const FEC_2_3: u32 = 2;
-    pub const FEC_3_4: u32 = 3;
-    pub const FEC_4_5: u32 = 4;
-    pub const FEC_5_6: u32 = 5;
-    pub const FEC_6_7: u32 = 6;
-    pub const FEC_7_8: u32 = 7;
-    pub const FEC_8_9: u32 = 8;
-    pub const FEC_AUTO: u32 = 9;
-    pub const FEC_3_5: u32 = 10;
-    pub const FEC_9_10: u32 = 11;
-    pub const FEC_2_5: u32 = 12;
-    pub const FEC_1_4: u32 = 13;
-    pub const FEC_1_3: u32 = 14;
-}
+impl TryFrom<u32> for Inversion {
+    type Error = Error;
 
-/// Type of modulation/constellation
-mod fe_modulation {
-    pub const QPSK: u32 = 0;
-    pub const QAM_16: u32 = 1;
-    pub const QAM_32: u32 = 2;
-    pub const QAM_64: u32 = 3;
-    pub const QAM_128: u32 = 4;
-    pub const QAM_256: u32 = 5;
-    pub const QAM_AUTO: u32 = 6;
-    pub const VSB_8: u32 = 7;
-    pub const VSB_16: u32 = 8;
-    pub const PSK_8: u32 = 9;
-    pub const APSK_16: u32 = 10;
-    pub const APSK_32: u32 = 11;
-    pub const DQPSK: u32 = 12;
-    pub const QAM_4_NR: u32 = 13;
-    pub const APSK_64: u32 = 14;
-    pub const APSK_128: u32 = 15;
-    pub const APSK_256: u32 = 16;
-}
-
-mod fe_transmit_mode {
-    pub const TRANSMISSION_MODE_2K: u32 = 0;
-    pub const TRANSMISSION_MODE_8K: u32 = 1;
-    pub const TRANSMISSION_MODE_AUTO: u32 = 2;
-    pub const TRANSMISSION_MODE_4K: u32 = 3;
-    pub const TRANSMISSION_MODE_1K: u32 = 4;
-    pub const TRANSMISSION_MODE_16K: u32 = 5;
-    pub const TRANSMISSION_MODE_32K: u32 = 6;
-    pub const TRANSMISSION_MODE_C1: u32 = 7;
-    pub const TRANSMISSION_MODE_C3780: u32 = 8;
-}
-
-mod fe_guard_interval {
-    pub const GUARD_INTERVAL_1_32: u32 = 0;
-    pub const GUARD_INTERVAL_1_16: u32 = 1;
-    pub const GUARD_INTERVAL_1_8: u32 = 2;
-    pub const GUARD_INTERVAL_1_4: u32 = 3;
-    pub const GUARD_INTERVAL_AUTO: u32 = 4;
-    pub const GUARD_INTERVAL_1_128: u32 = 5;
-    pub const GUARD_INTERVAL_19_128: u32 = 6;
-    pub const GUARD_INTERVAL_19_256: u32 = 7;
-    pub const GUARD_INTERVAL_PN420: u32 = 8;
-    pub const GUARD_INTERVAL_PN595: u32 = 9;
-    pub const GUARD_INTERVAL_PN945: u32 = 10;
-}
-
-mod fe_hierarchy {
-    pub const HIERARCHY_NONE: u32 = 0;
-    pub const HIERARCHY_1: u32 = 1;
-    pub const HIERARCHY_2: u32 = 2;
-    pub const HIERARCHY_4: u32 = 3;
-    pub const HIERARCHY_AUTO: u32 = 4;
-}
-
-mod fe_interleaving {
-    pub const INTERLEAVING_NONE: u32 = 0;
-    pub const INTERLEAVING_AUTO: u32 = 1;
-    pub const INTERLEAVING_240: u32 = 2;
-    pub const INTERLEAVING_720: u32 = 3;
-}
-
-mod fe_pilot {
-    pub const PILOT_ON: u32 = 0;
-    pub const PILOT_OFF: u32 = 1;
-    pub const PILOT_AUTO: u32 = 2;
-}
-
-mod fe_rolloff {
-    pub const ROLLOFF_35: u32 = 0;
-    pub const ROLLOFF_20: u32 = 1;
-    pub const ROLLOFF_25: u32 = 2;
-    pub const ROLLOFF_AUTO: u32 = 3;
-    pub const ROLLOFF_15: u32 = 4;
-    pub const ROLLOFF_10: u32 = 5;
-    pub const ROLLOFF_5: u32 = 6;
-}
-
-mod fe_delivery_system {
-    use std::fmt;
-
-    pub const SYS_UNDEFINED: u32 = 0;
-    pub const SYS_DVBC_ANNEX_A: u32 = 1;
-    pub const SYS_DVBC_ANNEX_B: u32 = 2;
-    pub const SYS_DVBT: u32 = 3;
-    pub const SYS_DSS: u32 = 4;
-    pub const SYS_DVBS: u32 = 5;
-    pub const SYS_DVBS2: u32 = 6;
-    pub const SYS_DVBH: u32 = 7;
-    pub const SYS_ISDBT: u32 = 8;
-    pub const SYS_ISDBS: u32 = 9;
-    pub const SYS_ISDBC: u32 = 10;
-    pub const SYS_ATSC: u32 = 11;
-    pub const SYS_ATSCMH: u32 = 12;
-    pub const SYS_DTMB: u32 = 13;
-    pub const SYS_CMMB: u32 = 14;
-    pub const SYS_DAB: u32 = 15;
-    pub const SYS_DVBT2: u32 = 16;
-    pub const SYS_TURBO: u32 = 17;
-    pub const SYS_DVBC_ANNEX_C: u32 = 18;
-    pub const SYS_DVBC2: u32 = 19;
-
-    pub struct DeliverySystemDisplay(pub u32);
-
-    impl fmt::Display for DeliverySystemDisplay {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            let v = match self.0 {
-                SYS_UNDEFINED => "none",
-                SYS_DVBC_ANNEX_A => "dvb-c",
-                SYS_DVBC_ANNEX_B => "dvb-c/b",
-                SYS_DVBT => "dvb-t",
-                SYS_DSS => "dss",
-                SYS_DVBS => "dvb-s",
-                SYS_DVBS2 => "dvb-s2",
-                SYS_DVBH => "dvb-h",
-                SYS_ISDBT => "isdb-t",
-                SYS_ISDBS => "isdb-s",
-                SYS_ISDBC => "isdb-c",
-                SYS_ATSC => "atsc",
-                SYS_ATSCMH => "atsc-m/h",
-                SYS_DTMB => "dtmb",
-                SYS_CMMB => "cmmb",
-                SYS_DAB => "dab",
-                SYS_DVBT2 => "dvb-t2",
-                SYS_TURBO => "dvb-s/turbo",
-                SYS_DVBC_ANNEX_C => "dvb-c/c",
-                SYS_DVBC2 => "dvb-c2",
-                _ => "unknown",
-            };
-
-            write!(f, "{}", v)
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(Inversion::Off),
+            1 => Ok(Inversion::On),
+            2 => Ok(Inversion::Auto),
+            _ => Err(Error::InvalidData(format!(
+                "invalid Inversion value: {}",
+                value
+            ))),
         }
+    }
+}
+
+/// Pilot tone mode
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pilot {
+    On = 0,
+    Off = 1,
+    Auto = 2,
+}
+
+impl TryFrom<u32> for Pilot {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(Pilot::On),
+            1 => Ok(Pilot::Off),
+            2 => Ok(Pilot::Auto),
+            _ => Err(Error::InvalidData(format!(
+                "invalid Pilot value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Rolloff factor
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rolloff {
+    /// Roll-off factor 0.35 (DVB-S)
+    R35 = 0,
+    /// Roll-off factor 0.20
+    R20 = 1,
+    /// Roll-off factor 0.25
+    R25 = 2,
+    Auto = 3,
+    /// Roll-off factor 0.15
+    R15 = 4,
+    /// Roll-off factor 0.10
+    R10 = 5,
+    /// Roll-off factor 0.05
+    R5 = 6,
+}
+
+impl TryFrom<u32> for Rolloff {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(Rolloff::R35),
+            1 => Ok(Rolloff::R20),
+            2 => Ok(Rolloff::R25),
+            3 => Ok(Rolloff::Auto),
+            4 => Ok(Rolloff::R15),
+            5 => Ok(Rolloff::R10),
+            6 => Ok(Rolloff::R5),
+            _ => Err(Error::InvalidData(format!(
+                "invalid Rolloff value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Guard interval
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuardInterval {
+    Gi1_32 = 0,
+    Gi1_16 = 1,
+    Gi1_8 = 2,
+    Gi1_4 = 3,
+    Auto = 4,
+    Gi1_128 = 5,
+    Gi19_128 = 6,
+    Gi19_256 = 7,
+    Pn420 = 8,
+    Pn595 = 9,
+    Pn945 = 10,
+}
+
+impl TryFrom<u32> for GuardInterval {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(GuardInterval::Gi1_32),
+            1 => Ok(GuardInterval::Gi1_16),
+            2 => Ok(GuardInterval::Gi1_8),
+            3 => Ok(GuardInterval::Gi1_4),
+            4 => Ok(GuardInterval::Auto),
+            5 => Ok(GuardInterval::Gi1_128),
+            6 => Ok(GuardInterval::Gi19_128),
+            7 => Ok(GuardInterval::Gi19_256),
+            8 => Ok(GuardInterval::Pn420),
+            9 => Ok(GuardInterval::Pn595),
+            10 => Ok(GuardInterval::Pn945),
+            _ => Err(Error::InvalidData(format!(
+                "invalid GuardInterval value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Transmission mode
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransmitMode {
+    Tm2k = 0,
+    Tm8k = 1,
+    Auto = 2,
+    Tm4k = 3,
+    Tm1k = 4,
+    Tm16k = 5,
+    Tm32k = 6,
+    C1 = 7,
+    C3780 = 8,
+}
+
+impl TryFrom<u32> for TransmitMode {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(TransmitMode::Tm2k),
+            1 => Ok(TransmitMode::Tm8k),
+            2 => Ok(TransmitMode::Auto),
+            3 => Ok(TransmitMode::Tm4k),
+            4 => Ok(TransmitMode::Tm1k),
+            5 => Ok(TransmitMode::Tm16k),
+            6 => Ok(TransmitMode::Tm32k),
+            7 => Ok(TransmitMode::C1),
+            8 => Ok(TransmitMode::C3780),
+            _ => Err(Error::InvalidData(format!(
+                "invalid TransmitMode value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Hierarchy
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hierarchy {
+    None = 0,
+    H1 = 1,
+    H2 = 2,
+    H4 = 3,
+    Auto = 4,
+}
+
+impl TryFrom<u32> for Hierarchy {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(Hierarchy::None),
+            1 => Ok(Hierarchy::H1),
+            2 => Ok(Hierarchy::H2),
+            3 => Ok(Hierarchy::H4),
+            4 => Ok(Hierarchy::Auto),
+            _ => Err(Error::InvalidData(format!(
+                "invalid Hierarchy value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Interleaving
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interleaving {
+    None = 0,
+    Auto = 1,
+    I240 = 2,
+    I720 = 3,
+}
+
+impl TryFrom<u32> for Interleaving {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: u32) -> Result<Self> {
+        match value {
+            0 => Ok(Interleaving::None),
+            1 => Ok(Interleaving::Auto),
+            2 => Ok(Interleaving::I240),
+            3 => Ok(Interleaving::I720),
+            _ => Err(Error::InvalidData(format!(
+                "invalid Interleaving value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+/// DVB delivery system (`fe_delivery_system`, from `linux/dvb/frontend.h`).
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliverySystem {
+    Undefined = 0,
+    DvbcAnnexA = 1,
+    DvbcAnnexB = 2,
+    Dvbt = 3,
+    Dss = 4,
+    Dvbs = 5,
+    Dvbs2 = 6,
+    Dvbh = 7,
+    Isdbt = 8,
+    Isdbs = 9,
+    Isdbc = 10,
+    Atsc = 11,
+    Atscmh = 12,
+    Dtmb = 13,
+    Cmmb = 14,
+    Dab = 15,
+    Dvbt2 = 16,
+    Turbo = 17,
+    DvbcAnnexC = 18,
+    Dvbc2 = 19,
+}
+
+impl DeliverySystem {
+    #[inline]
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+impl TryFrom<u32> for DeliverySystem {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self> {
+        let result = match value {
+            0 => DeliverySystem::Undefined,
+            1 => DeliverySystem::DvbcAnnexA,
+            2 => DeliverySystem::DvbcAnnexB,
+            3 => DeliverySystem::Dvbt,
+            4 => DeliverySystem::Dss,
+            5 => DeliverySystem::Dvbs,
+            6 => DeliverySystem::Dvbs2,
+            7 => DeliverySystem::Dvbh,
+            8 => DeliverySystem::Isdbt,
+            9 => DeliverySystem::Isdbs,
+            10 => DeliverySystem::Isdbc,
+            11 => DeliverySystem::Atsc,
+            12 => DeliverySystem::Atscmh,
+            13 => DeliverySystem::Dtmb,
+            14 => DeliverySystem::Cmmb,
+            15 => DeliverySystem::Dab,
+            16 => DeliverySystem::Dvbt2,
+            17 => DeliverySystem::Turbo,
+            18 => DeliverySystem::DvbcAnnexC,
+            19 => DeliverySystem::Dvbc2,
+            _ => {
+                return Err(Error::InvalidData(format!(
+                    "invalid DeliverySystem value: {}",
+                    value
+                )));
+            }
+        };
+        Ok(result)
+    }
+}
+
+impl fmt::Display for DeliverySystem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let v = match self {
+            DeliverySystem::Undefined => "none",
+            DeliverySystem::DvbcAnnexA => "dvb-c",
+            DeliverySystem::DvbcAnnexB => "dvb-c/b",
+            DeliverySystem::Dvbt => "dvb-t",
+            DeliverySystem::Dss => "dss",
+            DeliverySystem::Dvbs => "dvb-s",
+            DeliverySystem::Dvbs2 => "dvb-s2",
+            DeliverySystem::Dvbh => "dvb-h",
+            DeliverySystem::Isdbt => "isdb-t",
+            DeliverySystem::Isdbs => "isdb-s",
+            DeliverySystem::Isdbc => "isdb-c",
+            DeliverySystem::Atsc => "atsc",
+            DeliverySystem::Atscmh => "atsc-m/h",
+            DeliverySystem::Dtmb => "dtmb",
+            DeliverySystem::Cmmb => "cmmb",
+            DeliverySystem::Dab => "dab",
+            DeliverySystem::Dvbt2 => "dvb-t2",
+            DeliverySystem::Turbo => "dvb-s/turbo",
+            DeliverySystem::DvbcAnnexC => "dvb-c/c",
+            DeliverySystem::Dvbc2 => "dvb-c2",
+        };
+
+        write!(f, "{}", v)
+    }
+}
+
+/// Type of modulation/constellation (`fe_modulation`).
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modulation {
+    Qpsk = 0,
+    Qam16 = 1,
+    Qam32 = 2,
+    Qam64 = 3,
+    Qam128 = 4,
+    Qam256 = 5,
+    QamAuto = 6,
+    Vsb8 = 7,
+    Vsb16 = 8,
+    Psk8 = 9,
+    Apsk16 = 10,
+    Apsk32 = 11,
+    Dqpsk = 12,
+    Qam4nr = 13,
+    Apsk64 = 14,
+    Apsk128 = 15,
+    Apsk256 = 16,
+}
+
+impl Modulation {
+    #[inline]
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+impl TryFrom<u32> for Modulation {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self> {
+        let result = match value {
+            0 => Modulation::Qpsk,
+            1 => Modulation::Qam16,
+            2 => Modulation::Qam32,
+            3 => Modulation::Qam64,
+            4 => Modulation::Qam128,
+            5 => Modulation::Qam256,
+            6 => Modulation::QamAuto,
+            7 => Modulation::Vsb8,
+            8 => Modulation::Vsb16,
+            9 => Modulation::Psk8,
+            10 => Modulation::Apsk16,
+            11 => Modulation::Apsk32,
+            12 => Modulation::Dqpsk,
+            13 => Modulation::Qam4nr,
+            14 => Modulation::Apsk64,
+            15 => Modulation::Apsk128,
+            16 => Modulation::Apsk256,
+            _ => {
+                return Err(Error::InvalidData(format!(
+                    "invalid Modulation value: {}",
+                    value
+                )));
+            }
+        };
+        Ok(result)
+    }
+}
+
+/// Inner forward error correction / code rate (`fe_code_rate`).
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fec {
+    None = 0,
+    Fec1_2 = 1,
+    Fec2_3 = 2,
+    Fec3_4 = 3,
+    Fec4_5 = 4,
+    Fec5_6 = 5,
+    Fec6_7 = 6,
+    Fec7_8 = 7,
+    Fec8_9 = 8,
+    Auto = 9,
+    Fec3_5 = 10,
+    Fec9_10 = 11,
+    Fec2_5 = 12,
+    Fec1_4 = 13,
+    Fec1_3 = 14,
+}
+
+impl Fec {
+    #[inline]
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
+}
+
+impl TryFrom<u32> for Fec {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self> {
+        let result = match value {
+            0 => Fec::None,
+            1 => Fec::Fec1_2,
+            2 => Fec::Fec2_3,
+            3 => Fec::Fec3_4,
+            4 => Fec::Fec4_5,
+            5 => Fec::Fec5_6,
+            6 => Fec::Fec6_7,
+            7 => Fec::Fec7_8,
+            8 => Fec::Fec8_9,
+            9 => Fec::Auto,
+            10 => Fec::Fec3_5,
+            11 => Fec::Fec9_10,
+            12 => Fec::Fec2_5,
+            13 => Fec::Fec1_4,
+            14 => Fec::Fec1_3,
+            _ => {
+                return Err(Error::InvalidData(format!(
+                    "invalid code rate value: {}",
+                    value
+                )));
+            }
+        };
+        Ok(result)
     }
 }
 
@@ -585,16 +936,16 @@ mod dtv_property_cmd {
 
 /// Store one of frontend command and its value
 #[repr(C, packed)]
-pub struct DtvProperty {
+pub struct DtvPropertyRaw {
     pub cmd: u32,
     __reserved_1: [u32; 3],
     pub u: DtvPropertyData,
     pub result: i32,
 }
 
-impl fmt::Debug for DtvProperty {
+impl fmt::Debug for DtvPropertyRaw {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = f.debug_struct("DtvProperty");
+        let mut s = f.debug_struct("DtvPropertyRaw");
 
         const FIELD_CMD: &str = "cmd";
         const FIELD_DATA: &str = "data";
@@ -696,7 +1047,7 @@ impl fmt::Debug for DtvProperty {
     }
 }
 
-impl DtvProperty {
+impl DtvPropertyRaw {
     #[inline]
     pub fn new(cmd: u32, data: u32) -> Self {
         Self {

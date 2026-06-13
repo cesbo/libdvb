@@ -1,7 +1,21 @@
-pub use dmx_filter_flags::*;
+use bitflags::bitflags;
+
 pub use dmx_input::*;
 pub use dmx_output::*;
 pub use dmx_ts_pes::*;
+
+bitflags! {
+    /// Flags for the demux filter
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct DmxFilterFlags: u32 {
+        /// Only deliver sections where the CRC check succeeded
+        const CHECK_CRC = 1;
+        /// Disable the section filter after one section has been delivered
+        const ONESHOT = 2;
+        /// Start filter immediately without requiring a `DMX_START`
+        const IMMEDIATE_START = 4;
+    }
+}
 
 /// Output for the demux
 mod dmx_output {
@@ -76,16 +90,6 @@ mod dmx_ts_pes {
 
     /// any other PID.
     pub const DMX_PES_OTHER: u32 = 20;
-}
-
-/// Flags for the demux filter
-mod dmx_filter_flags {
-    /// Only deliver sections where the CRC check succeeded
-    pub const DMX_CHECK_CRC: u32 = 1;
-    /// Disable the section filter after one section has been delivered
-    pub const DMX_ONESHOT: u32 = 2;
-    /// Start filter immediately without requiring a `DMX_START`
-    pub const DMX_IMMEDIATE_START: u32 = 4;
 }
 
 /// Specifies Packetized Elementary Stream (PES) filter parameters

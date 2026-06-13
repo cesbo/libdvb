@@ -1,8 +1,8 @@
 use std::fmt;
 
 use super::{
-    sys::*,
     FeDevice,
+    sys::*,
 };
 use crate::error::Result;
 
@@ -10,10 +10,10 @@ use crate::error::Result;
 #[derive(Debug)]
 pub struct FeStatus {
     /// `sys::frontend::fe_status`
-    status: u32,
+    status: FeStatusFlags,
 
     /// properties
-    props: [DtvProperty; 6],
+    props: [DtvPropertyRaw; 6],
 }
 
 const IDX_DELIVERY_SYSTEM: usize = 0;
@@ -26,20 +26,20 @@ const IDX_UNC: usize = 5;
 impl Default for FeStatus {
     fn default() -> FeStatus {
         FeStatus {
-            status: 0,
+            status: FeStatusFlags::empty(),
             props: [
                 // delivery system
-                DtvProperty::new(DTV_DELIVERY_SYSTEM, FE_NONE),
+                DtvPropertyRaw::new(DTV_DELIVERY_SYSTEM, 0),
                 // modulation
-                DtvProperty::new(DTV_MODULATION, QPSK),
+                DtvPropertyRaw::new(DTV_MODULATION, Modulation::Qpsk as u32),
                 // signal level
-                DtvProperty::new(DTV_STAT_SIGNAL_STRENGTH, 0),
+                DtvPropertyRaw::new(DTV_STAT_SIGNAL_STRENGTH, 0),
                 // signal-to-noise ratio
-                DtvProperty::new(DTV_STAT_CNR, 0),
+                DtvPropertyRaw::new(DTV_STAT_CNR, 0),
                 // ber - number of bit errors
-                DtvProperty::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
+                DtvPropertyRaw::new(DTV_STAT_PRE_ERROR_BIT_COUNT, 0),
                 // unc - number of block errors
-                DtvProperty::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
+                DtvPropertyRaw::new(DTV_STAT_ERROR_BLOCK_COUNT, 0),
             ],
         }
     }
@@ -76,22 +76,18 @@ impl Default for FeStatus {
 /// ```
 impl fmt::Display for FeStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.status == FE_NONE {
+        if self.status.is_empty() {
             write!(f, "OFF")?;
             return Ok(());
         }
 
-        if self.status & FE_HAS_LOCK != 0 {
-            write!(
-                f,
-                "LOCK {}",
-                DeliverySystemDisplay(self.get_delivery_system())
-            )?;
+        if self.status.contains(FeStatusFlags::HAS_LOCK) {
+            write!(f, "LOCK {}", self.get_delivery_system())?;
         } else {
-            write!(f, "NO-LOCK 0x{:02X}", self.status)?;
+            write!(f, "NO-LOCK 0x{:02X}", self.status.bits())?;
         }
 
-        if self.status & FE_HAS_SIGNAL == 0 {
+        if !self.status.contains(FeStatusFlags::HAS_SIGNAL) {
             return Ok(());
         }
 
@@ -102,7 +98,7 @@ impl fmt::Display for FeStatus {
             self.get_signal_strength().unwrap_or(0)
         )?;
 
-        if self.status & FE_HAS_CARRIER == 0 {
+        if !self.status.contains(FeStatusFlags::HAS_CARRIER) {
             return Ok(());
         }
 
@@ -113,7 +109,7 @@ impl fmt::Display for FeStatus {
             self.get_snr().unwrap_or(0)
         )?;
 
-        if self.status & FE_HAS_LOCK == 0 {
+        if !self.status.contains(FeStatusFlags::HAS_LOCK) {
             return Ok(());
         }
 
@@ -138,14 +134,16 @@ impl fmt::Display for FeStatus {
 impl FeStatus {
     /// Returns current delivery system
     #[inline]
-    pub fn get_delivery_system(&self) -> u32 {
-        unsafe { self.props[IDX_DELIVERY_SYSTEM].u.data }
+    pub fn get_delivery_system(&self) -> DeliverySystem {
+        let v = unsafe { self.props[IDX_DELIVERY_SYSTEM].u.data };
+        DeliverySystem::try_from(v).unwrap_or(DeliverySystem::Undefined)
     }
 
     /// Returns current modulation
     #[inline]
-    pub fn get_modulation(&self) -> u32 {
-        unsafe { self.props[IDX_MODULATION].u.data }
+    pub fn get_modulation(&self) -> Modulation {
+        let v = unsafe { self.props[IDX_MODULATION].u.data };
+        Modulation::try_from(v).unwrap_or(Modulation::Qpsk)
     }
 
     /// Returns Signal Strength in dBm
@@ -223,7 +221,9 @@ impl FeStatus {
             return Ok(());
         }
 
-        if stats.stat[1].scale == FE_SCALE_RELATIVE || (self.status & FE_HAS_SIGNAL) == 0 {
+        if stats.stat[1].scale == FE_SCALE_RELATIVE
+            || !self.status.contains(FeStatusFlags::HAS_SIGNAL)
+        {
             return Ok(());
         }
 
@@ -268,7 +268,9 @@ impl FeStatus {
             return Ok(());
         }
 
-        if stats.stat[1].scale == FE_SCALE_RELATIVE || (self.status & FE_HAS_CARRIER) == 0 {
+        if stats.stat[1].scale == FE_SCALE_RELATIVE
+            || !self.status.contains(FeStatusFlags::HAS_CARRIER)
+        {
             return Ok(());
         }
 
@@ -276,14 +278,17 @@ impl FeStatus {
 
         if stats.stat[0].scale == FE_SCALE_DECIBEL {
             let hi = match delivery_system {
-                SYS_DVBS | SYS_DVBS2 => 15000,
+                DeliverySystem::Dvbs | DeliverySystem::Dvbs2 => 15000,
 
-                SYS_DVBC_ANNEX_A | SYS_DVBC_ANNEX_B | SYS_DVBC_ANNEX_C | SYS_DVBC2 => 28000,
+                DeliverySystem::DvbcAnnexA
+                | DeliverySystem::DvbcAnnexB
+                | DeliverySystem::DvbcAnnexC
+                | DeliverySystem::Dvbc2 => 28000,
 
-                SYS_DVBT | SYS_DVBT2 => 19000,
+                DeliverySystem::Dvbt | DeliverySystem::Dvbt2 => 19000,
 
-                SYS_ATSC => match modulation {
-                    VSB_8 | VSB_16 => 19000,
+                DeliverySystem::Atsc => match modulation {
+                    Modulation::Vsb8 | Modulation::Vsb16 => 19000,
                     _ => 28000,
                 },
 
@@ -314,7 +319,8 @@ impl FeStatus {
             stats.len = 1;
         }
 
-        if stats.stat[0].scale == FE_SCALE_COUNTER || (self.status & FE_HAS_LOCK) == 0 {
+        if stats.stat[0].scale == FE_SCALE_COUNTER || !self.status.contains(FeStatusFlags::HAS_LOCK)
+        {
             return Ok(());
         }
 
@@ -335,7 +341,8 @@ impl FeStatus {
             stats.len = 1;
         }
 
-        if stats.stat[0].scale == FE_SCALE_COUNTER || (self.status & FE_HAS_LOCK) == 0 {
+        if stats.stat[0].scale == FE_SCALE_COUNTER || !self.status.contains(FeStatusFlags::HAS_LOCK)
+        {
             return Ok(());
         }
 
@@ -361,7 +368,7 @@ impl FeStatus {
     pub fn read(&mut self, fe: &FeDevice) -> Result<()> {
         self.status = fe.read_status()?;
 
-        if self.status == FE_NONE {
+        if self.status.is_empty() {
             return Ok(());
         }
 
