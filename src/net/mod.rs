@@ -93,19 +93,6 @@ impl NetDevice {
             if_num: data.if_num,
         })
     }
-
-    /// Removes a network interface
-    pub fn remove_if(&self, interface: NetInterface) -> Result<()> {
-        // NET_REMOVE_IF
-        nix::ioctl_write_int_bad!(
-            #[inline]
-            ioctl_call,
-            nix::request_code_none!(b'o', 53)
-        );
-        unsafe { ioctl_call(self.as_raw_fd(), interface.if_num as _) }?;
-
-        Ok(())
-    }
 }
 
 pub struct NetInterface<'a> {
@@ -129,7 +116,7 @@ impl<'a> fmt::Display for NetInterface<'a> {
 
 impl<'a> NetInterface<'a> {
     /// Returns interface mac address or empty mac on any error
-    pub fn get_mac(&self) -> String {
+    pub fn mac(&self) -> String {
         let path = format!("/sys/class/net/{}/address", self);
         let file = match File::open(&path) {
             Ok(v) => v,
@@ -143,5 +130,17 @@ impl<'a> NetInterface<'a> {
             Ok(MAC_SIZE) => mac,
             _ => EMPTY_MAC.to_owned(),
         }
+    }
+}
+
+impl Drop for NetInterface<'_> {
+    fn drop(&mut self) {
+        // NET_REMOVE_IF
+        nix::ioctl_write_int_bad!(
+            #[inline]
+            ioctl_call,
+            nix::request_code_none!(b'o', 53)
+        );
+        let _ = unsafe { ioctl_call(self.net.as_raw_fd(), self.if_num as _) };
     }
 }

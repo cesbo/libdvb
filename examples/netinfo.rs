@@ -19,7 +19,6 @@ fn main() {
         .add_if(0, libdvb::net::sys::DVB_NET_FEEDTYPE_MPE)
         .unwrap();
     println!("Interface: {}", &interface);
-    let mac = interface.get_mac();
+    let mac = interface.mac();
     println!("MAC: {}", &mac);
-    dev.remove_if(interface).unwrap();
 }
