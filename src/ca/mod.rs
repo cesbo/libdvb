@@ -11,11 +11,17 @@ use std::{
         File,
         OpenOptions,
     },
-    os::unix::{
-        fs::OpenOptionsExt,
-        io::{
-            AsRawFd,
-            RawFd,
+    os::{
+        fd::{
+            AsFd,
+            BorrowedFd,
+        },
+        unix::{
+            fs::OpenOptionsExt,
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
     },
     thread,
@@ -43,6 +49,13 @@ impl AsRawFd for CaDevice {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for CaDevice {
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 

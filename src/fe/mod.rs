@@ -9,14 +9,20 @@ use std::{
         OpenOptions,
     },
     ops::Range,
-    os::unix::{
-        fs::{
-            FileTypeExt,
-            OpenOptionsExt,
+    os::{
+        fd::{
+            AsFd,
+            BorrowedFd,
         },
-        io::{
-            AsRawFd,
-            RawFd,
+        unix::{
+            fs::{
+                FileTypeExt,
+                OpenOptionsExt,
+            },
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
     },
 };
@@ -144,6 +150,13 @@ impl AsRawFd for FeDevice {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for FeDevice {
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 
@@ -583,8 +596,6 @@ impl FeDevice {
     }
 
     /// Returns the current API version
-    /// major - first byte
-    /// minor - second byte
     #[inline]
     pub fn api_version(&self) -> ApiVersion {
         self.api_version

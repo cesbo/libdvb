@@ -5,11 +5,17 @@ use std::{
         File,
         OpenOptions,
     },
-    os::unix::{
-        fs::OpenOptionsExt,
-        io::{
-            AsRawFd,
-            RawFd,
+    os::{
+        fd::{
+            AsFd,
+            BorrowedFd,
+        },
+        unix::{
+            fs::OpenOptionsExt,
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
     },
 };
@@ -27,6 +33,13 @@ impl AsRawFd for DmxDevice {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for DmxDevice {
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 

@@ -7,11 +7,17 @@ use std::{
         OpenOptions,
     },
     io::Read,
-    os::unix::{
-        fs::OpenOptionsExt,
-        io::{
-            AsRawFd,
-            RawFd,
+    os::{
+        fd::{
+            AsFd,
+            BorrowedFd,
+        },
+        unix::{
+            fs::OpenOptionsExt,
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
     },
 };
@@ -35,6 +41,13 @@ impl AsRawFd for NetDevice {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for NetDevice {
+    #[inline]
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 
