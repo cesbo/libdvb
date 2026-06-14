@@ -82,12 +82,25 @@ impl DtvProperty {
     }
 }
 
+/// DVB API version (major.minor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ApiVersion {
+    pub major: u8,
+    pub minor: u8,
+}
+
+impl fmt::Display for ApiVersion {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}.{}", self.major, self.minor)
+    }
+}
+
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
     file: File,
 
-    api_version: u16,
+    api_version: ApiVersion,
 
     name: String,
     delivery_system_list: Vec<DeliverySystem>,
@@ -98,12 +111,7 @@ pub struct FeDevice {
 
 impl fmt::Display for FeDevice {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
-            f,
-            "DVB API: {}.{}",
-            self.api_version >> 8,
-            self.api_version & 0xFF
-        )?;
+        writeln!(f, "DVB API: {}", self.api_version)?;
         writeln!(f, "Frontend: {}", self.name)?;
 
         write!(f, "Delivery system:")?;
@@ -195,7 +203,11 @@ impl FeDevice {
 
         // DVB API Version
 
-        self.api_version = cmdseq[0].get_data() as u16;
+        let v = cmdseq[0].get_data() as u16;
+        self.api_version = ApiVersion {
+            major: (v >> 8) as u8,
+            minor: (v & 0xFF) as u8,
+        };
 
         // Supported delivery systems
 
@@ -228,7 +240,7 @@ impl FeDevice {
         let mut fe = FeDevice {
             file,
 
-            api_version: 0,
+            api_version: ApiVersion { major: 0, minor: 0 },
 
             name: String::default(),
             delivery_system_list: Vec::default(),
@@ -574,7 +586,7 @@ impl FeDevice {
     /// major - first byte
     /// minor - second byte
     #[inline]
-    pub fn get_api_version(&self) -> u16 {
+    pub fn api_version(&self) -> ApiVersion {
         self.api_version
     }
 }

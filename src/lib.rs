@@ -5,6 +5,7 @@ pub mod fe;
 pub mod net;
 
 pub use fe::{
+    ApiVersion,
     DtvProperty,
     FeDevice,
     FeStatus,
