@@ -189,7 +189,7 @@ impl FeDevice {
 
         // DVB API Version
 
-        let v = cmdseq[0].get_data() as u16;
+        let v = cmdseq[0].data() as u16;
         self.api_version = ApiVersion {
             major: (v >> 8) as u8,
             minor: (v & 0xFF) as u8,

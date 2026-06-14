@@ -115,20 +115,19 @@ impl FeStatus {
 
     /// Returns current delivery system
     pub fn delivery_system(&self) -> DeliverySystem {
-        let v = unsafe { self.props[IDX_DELIVERY_SYSTEM].u.data };
+        let v = self.props[IDX_DELIVERY_SYSTEM].data();
         DeliverySystem::try_from(v).unwrap_or(DeliverySystem::Undefined)
     }
 
     /// Returns current modulation
-    #[inline]
     pub fn modulation(&self) -> Modulation {
-        let v = unsafe { self.props[IDX_MODULATION].u.data };
+        let v = self.props[IDX_MODULATION].data();
         Modulation::try_from(v).unwrap_or(Modulation::Qpsk)
     }
 
     /// Returns Signal Strength in dBm
     pub fn signal_strength_decibel(&self) -> Option<f64> {
-        let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[0] };
+        let stat = self.props[IDX_SIGNAL_STRENGTH].stat(0)?;
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
         } else {
@@ -138,7 +137,7 @@ impl FeStatus {
 
     /// Returns Signal Strength in percentage
     pub fn signal_strength(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[1] };
+        let stat = self.props[IDX_SIGNAL_STRENGTH].stat(1)?;
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
         } else {
@@ -148,7 +147,7 @@ impl FeStatus {
 
     /// Returns Signal to noise ratio in dB
     pub fn snr_decibel(&self) -> Option<f64> {
-        let stat = unsafe { &self.props[IDX_SNR].u.st.stat[0] };
+        let stat = self.props[IDX_SNR].stat(0)?;
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
         } else {
@@ -158,7 +157,7 @@ impl FeStatus {
 
     /// Returns Signal Strength in percentage
     pub fn snr(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[IDX_SNR].u.st.stat[1] };
+        let stat = self.props[IDX_SNR].stat(1)?;
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
         } else {
@@ -168,7 +167,7 @@ impl FeStatus {
 
     /// Returns BER value if available
     pub fn ber(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[IDX_BER].u.st.stat[0] };
+        let stat = self.props[IDX_BER].stat(0)?;
         if stat.scale == FE_SCALE_COUNTER {
             Some((stat.value & 0xFFFF_FFFF) as u32)
         } else {
@@ -178,7 +177,7 @@ impl FeStatus {
 
     /// Returns UNC value if available
     pub fn unc(&self) -> Option<u32> {
-        let stat = unsafe { &self.props[IDX_UNC].u.st.stat[0] };
+        let stat = self.props[IDX_UNC].stat(0)?;
         if stat.scale == FE_SCALE_COUNTER {
             Some((stat.value & 0xFFFF_FFFF) as u32)
         } else {
@@ -186,9 +185,7 @@ impl FeStatus {
         }
     }
 
-    fn normalize_signal_strength(&mut self) -> Result<()> {
-        let stats = unsafe { &mut self.props[IDX_SIGNAL_STRENGTH].u.st };
-
+    fn normalize_signal_strength(&self, mut stats: DtvFrontendStats) -> DtvFrontendStats {
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
             stats.stat[i].value = 0;
@@ -198,44 +195,40 @@ impl FeStatus {
 
         if stats.stat[0].scale == FE_SCALE_RELATIVE {
             stats.stat.swap(0, 1);
-            return Ok(());
+            return stats;
         }
 
         if stats.stat[1].scale == FE_SCALE_RELATIVE
             || !self.status.contains(FeStatusFlags::HAS_SIGNAL)
         {
-            return Ok(());
+            return stats;
         }
 
-        // calculate relative value
-
-        if stats.stat[0].scale == FE_SCALE_DECIBEL {
-            // TODO: check delivery_system
-
-            let lo: i64 = -85000;
-            let hi: i64 = -6000;
-
-            stats.stat[1].scale = FE_SCALE_RELATIVE;
-            stats.stat[1].value = {
-                if stats.stat[0].value > hi {
-                    65535
-                } else if stats.stat[0].value < lo {
-                    0
-                } else {
-                    65535 * (lo - stats.stat[0].value) / (lo - hi)
-                }
-            };
+        // Calculates relative signal strength value
+        if stats.stat[0].scale != FE_SCALE_DECIBEL {
+            return stats;
         }
 
-        Ok(())
+        // TODO: check delivery_system
+
+        let lo: i64 = -85000;
+        let hi: i64 = -6000;
+
+        stats.stat[1].scale = FE_SCALE_RELATIVE;
+        stats.stat[1].value = {
+            if stats.stat[0].value > hi {
+                65535
+            } else if stats.stat[0].value < lo {
+                0
+            } else {
+                65535 * (lo - stats.stat[0].value) / (lo - hi)
+            }
+        };
+
+        stats
     }
 
-    fn normalize_snr(&mut self) -> Result<()> {
-        let delivery_system = self.delivery_system();
-        let modulation = self.modulation();
-
-        let stats = unsafe { &mut self.props[IDX_SNR].u.st };
-
+    fn normalize_snr(&self, mut stats: DtvFrontendStats) -> DtvFrontendStats {
         for i in usize::from(stats.len) .. 2 {
             stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
             stats.stat[i].value = 0;
@@ -245,101 +238,101 @@ impl FeStatus {
 
         if stats.stat[0].scale == FE_SCALE_RELATIVE {
             stats.stat.swap(0, 1);
-            return Ok(());
+            return stats;
         }
 
         if stats.stat[1].scale == FE_SCALE_RELATIVE
             || !self.status.contains(FeStatusFlags::HAS_CARRIER)
         {
-            return Ok(());
+            return stats;
         }
 
-        // calculate relative value
-
-        if stats.stat[0].scale == FE_SCALE_DECIBEL {
-            let hi = match delivery_system {
-                DeliverySystem::Dvbs | DeliverySystem::Dvbs2 => 15000,
-
-                DeliverySystem::DvbcAnnexA
-                | DeliverySystem::DvbcAnnexB
-                | DeliverySystem::DvbcAnnexC
-                | DeliverySystem::Dvbc2 => 28000,
-
-                DeliverySystem::Dvbt | DeliverySystem::Dvbt2 => 19000,
-
-                DeliverySystem::Atsc => match modulation {
-                    Modulation::Vsb8 | Modulation::Vsb16 => 19000,
-                    _ => 28000,
-                },
-
-                _ => return Ok(()),
-            };
-
-            stats.stat[1].scale = FE_SCALE_RELATIVE;
-            stats.stat[1].value = {
-                if stats.stat[0].value >= hi {
-                    65535
-                } else if stats.stat[0].value <= 0 {
-                    0
-                } else {
-                    65535 * stats.stat[0].value / hi
-                }
-            };
+        // Calculates relative SNR value
+        if stats.stat[0].scale != FE_SCALE_DECIBEL {
+            return stats;
         }
 
-        Ok(())
+        let delivery_system = self.delivery_system();
+        let modulation = self.modulation();
+        let hi = match delivery_system {
+            DeliverySystem::Dvbs | DeliverySystem::Dvbs2 => 15000,
+
+            DeliverySystem::DvbcAnnexA
+            | DeliverySystem::DvbcAnnexB
+            | DeliverySystem::DvbcAnnexC
+            | DeliverySystem::Dvbc2 => 28000,
+
+            DeliverySystem::Dvbt | DeliverySystem::Dvbt2 => 19000,
+
+            DeliverySystem::Atsc => match modulation {
+                Modulation::Vsb8 | Modulation::Vsb16 => 19000,
+                _ => 28000,
+            },
+
+            _ => return stats,
+        };
+
+        stats.stat[1].scale = FE_SCALE_RELATIVE;
+        stats.stat[1].value = {
+            if stats.stat[0].value >= hi {
+                65535
+            } else if stats.stat[0].value <= 0 {
+                0
+            } else {
+                65535 * stats.stat[0].value / hi
+            }
+        };
+
+        stats
     }
 
-    fn normalize_ber(&mut self, fe: &FeDevice) -> Result<()> {
-        let stats = unsafe { &mut self.props[IDX_BER].u.st };
-
+    /// Normalize BER value
+    fn normalize_ber(&self, mut stats: DtvFrontendStats, fe: &FeDevice) -> DtvFrontendStats {
         if stats.len == 0 {
             stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
             stats.stat[0].value = 0;
             stats.len = 1;
         }
 
-        if stats.stat[0].scale == FE_SCALE_COUNTER || !self.status.contains(FeStatusFlags::HAS_LOCK)
+        if stats.stat[0].scale != FE_SCALE_COUNTER && self.status.contains(FeStatusFlags::HAS_LOCK)
         {
-            return Ok(());
-        }
-
-        if let Ok(value) = fe.read_ber() {
             stats.stat[0].scale = FE_SCALE_COUNTER;
-            stats.stat[0].value = i64::from(value);
+            stats.stat[0].value = fe.read_ber().map(i64::from).unwrap_or(-1);
         }
 
-        Ok(())
+        stats
     }
 
-    fn normalize_unc(&mut self, fe: &FeDevice) -> Result<()> {
-        let stats = unsafe { &mut self.props[IDX_UNC].u.st };
-
+    /// Normalize UNC value
+    fn normalize_unc(&self, mut stats: DtvFrontendStats, fe: &FeDevice) -> DtvFrontendStats {
         if stats.len == 0 {
             stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
             stats.stat[0].value = 0;
             stats.len = 1;
         }
 
-        if stats.stat[0].scale == FE_SCALE_COUNTER || !self.status.contains(FeStatusFlags::HAS_LOCK)
+        if stats.stat[0].scale != FE_SCALE_COUNTER && self.status.contains(FeStatusFlags::HAS_LOCK)
         {
-            return Ok(());
-        }
-
-        if let Ok(value) = fe.read_unc() {
             stats.stat[0].scale = FE_SCALE_COUNTER;
-            stats.stat[0].value = i64::from(value);
+            stats.stat[0].value = fe.read_unc().map(i64::from).unwrap_or(-1);
         }
 
-        Ok(())
+        stats
     }
 
     /// set decibel to `stat[0]` and relative to `stat[1]` and fallback to DVBv3 API
     fn normalize_props(&mut self, fe: &FeDevice) -> Result<()> {
-        self.normalize_signal_strength()?;
-        self.normalize_snr()?;
-        self.normalize_ber(fe)?;
-        self.normalize_unc(fe)?;
+        let stats = self.normalize_signal_strength(self.props[IDX_SIGNAL_STRENGTH].stats());
+        self.props[IDX_SIGNAL_STRENGTH].set_stats(stats);
+
+        let stats = self.normalize_snr(self.props[IDX_SNR].stats());
+        self.props[IDX_SNR].set_stats(stats);
+
+        let stats = self.normalize_ber(self.props[IDX_BER].stats(), fe);
+        self.props[IDX_BER].set_stats(stats);
+
+        let stats = self.normalize_unc(self.props[IDX_UNC].stats(), fe);
+        self.props[IDX_UNC].set_stats(stats);
 
         Ok(())
     }

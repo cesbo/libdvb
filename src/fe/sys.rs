@@ -953,52 +953,52 @@ impl fmt::Debug for DtvPropertyRaw {
 
         match self.cmd {
             DTV_FREQUENCY => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_FREQUENCY");
                 s.field(FIELD_DATA, &data);
             }
             DTV_MODULATION => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_MODULATION");
                 s.field(FIELD_DATA, &data);
             }
             DTV_BANDWIDTH_HZ => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_BANDWIDTH_HZ");
                 s.field(FIELD_DATA, &data);
             }
             DTV_INVERSION => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_INVERSION");
                 s.field(FIELD_DATA, &data);
             }
             DTV_SYMBOL_RATE => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_SYMBOL_RATE");
                 s.field(FIELD_DATA, &data);
             }
             DTV_INNER_FEC => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_INNER_FEC");
                 s.field(FIELD_DATA, &data);
             }
             DTV_PILOT => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_PILOT");
                 s.field(FIELD_DATA, &data);
             }
             DTV_ROLLOFF => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_ROLLOFF");
                 s.field(FIELD_DATA, &data);
             }
             DTV_DELIVERY_SYSTEM => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_DELIVERY_SYSTEM");
                 s.field(FIELD_DATA, &data);
             }
             DTV_API_VERSION => {
-                let data = self.get_data();
+                let data = self.data();
                 s.field(FIELD_CMD, &"DTV_API_VERSION");
                 s.field(FIELD_DATA, &data);
             }
@@ -1048,7 +1048,6 @@ impl fmt::Debug for DtvPropertyRaw {
 }
 
 impl DtvPropertyRaw {
-    #[inline]
     pub fn new(cmd: u32, data: u32) -> Self {
         Self {
             cmd,
@@ -1058,11 +1057,28 @@ impl DtvPropertyRaw {
         }
     }
 
-    #[inline]
-    pub(crate) fn get_data(&self) -> u32 {
-        let u_ptr = std::ptr::addr_of!(self.u);
-        let u = unsafe { u_ptr.read_unaligned() };
-        unsafe { u.data }
+    pub(crate) fn data(&self) -> u32 {
+        let ptr = std::ptr::addr_of!(self.u).cast::<u32>();
+        unsafe { ptr.read_unaligned() }
+    }
+
+    pub(crate) fn stats(&self) -> DtvFrontendStats {
+        let ptr = std::ptr::addr_of!(self.u).cast::<DtvFrontendStats>();
+        unsafe { ptr.read_unaligned() }
+    }
+
+    pub(crate) fn set_stats(&mut self, stats: DtvFrontendStats) {
+        let ptr = std::ptr::addr_of_mut!(self.u).cast::<DtvFrontendStats>();
+        unsafe { ptr.write_unaligned(stats) };
+    }
+
+    pub(crate) fn stat(&self, index: usize) -> Option<DtvStats> {
+        let stats = self.stats();
+        if index < usize::from(stats.len) {
+            Some(stats.stat[index])
+        } else {
+            None
+        }
     }
 }
 
