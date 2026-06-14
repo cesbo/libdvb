@@ -122,46 +122,13 @@ pub struct FeDevice {
     caps: FeCaps,
 }
 
-impl fmt::Display for FeDevice {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "DVB API: {}", self.api_version)?;
-        writeln!(f, "Frontend: {}", self.name)?;
-
-        write!(f, "Delivery system:")?;
-        for v in &self.delivery_system_list {
-            write!(f, " {}", v)?;
-        }
-        writeln!(f)?;
-
-        writeln!(
-            f,
-            "Frequency range: {} .. {}",
-            self.frequency_range.start / 1000,
-            self.frequency_range.end / 1000
-        )?;
-
-        writeln!(
-            f,
-            "Symbolrate range: {} .. {}",
-            self.symbolrate_range.start / 1000,
-            self.symbolrate_range.end / 1000
-        )?;
-
-        write!(f, "Frontend capabilities: {:?}", self.caps)?;
-
-        Ok(())
-    }
-}
-
 impl AsRawFd for FeDevice {
-    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
     }
 }
 
 impl AsFd for FeDevice {
-    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
@@ -274,13 +241,11 @@ impl FeDevice {
     }
 
     /// Attempts to open frontend device in read-only mode
-    #[inline]
     pub fn open_ro(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, false)
     }
 
     /// Attempts to open frontend device in read-write mode
-    #[inline]
     pub fn open_rw(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, true)
     }
@@ -597,5 +562,25 @@ impl FeDevice {
     /// Frontend name as reported by `FE_GET_INFO`.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Delivery systems supported by the frontend.
+    pub fn delivery_systems(&self) -> &[DeliverySystem] {
+        &self.delivery_system_list
+    }
+
+    /// Tunable frequency range (kHz units as reported by the kernel).
+    pub fn frequency_range(&self) -> Range<u32> {
+        self.frequency_range.clone()
+    }
+
+    /// Supported symbol-rate range.
+    pub fn symbolrate_range(&self) -> Range<u32> {
+        self.symbolrate_range.clone()
+    }
+
+    /// Frontend capability flags.
+    pub fn caps(&self) -> FeCaps {
+        self.caps
     }
 }

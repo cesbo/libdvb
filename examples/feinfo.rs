@@ -17,7 +17,19 @@ fn main() {
     };
 
     let fe = FeDevice::open_ro(adapter, device).unwrap();
-    println!("{}", &fe);
+    println!("DVB API: {}", fe.api_version());
+    println!("Frontend: {}", fe.name());
+
+    print!("Delivery system:");
+    for v in fe.delivery_systems() {
+        print!(" {}", v);
+    }
+    println!();
+
+    println!("Frequency range: {:?}", fe.frequency_range());
+    println!("Symbolrate range: {:?}", fe.symbolrate_range());
+
+    println!("Frontend capabilities: {:?}", fe.caps());
 
     let mut status = FeStatus::default();
     status.read(&fe).unwrap();
