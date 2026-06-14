@@ -27,7 +27,7 @@ fn main() {
     let delay = Duration::from_secs(1);
     loop {
         status.read(&fe).unwrap();
-        println!("{}", &status);
+        println!("{}", status.to_status_string());
         thread::sleep(delay);
     }
 }

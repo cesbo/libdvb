@@ -1,5 +1,3 @@
-use std::fmt;
-
 use super::{
     FeDevice,
     sys::*,
@@ -45,109 +43,91 @@ impl Default for FeStatus {
     }
 }
 
-/// Returns an object that implements `Display` for different verbosity levels
-///
-/// Tuner is turned off:
-///
-/// ```text
-/// OFF
-/// ```
-///
-/// Tuner acquiring signal but has no lock:
-///
-/// ```text
-/// NO-LOCK 0x01 | Signal -38.56dBm (59%)
-/// NO-LOCK 0x03 | Signal -38.56dBm (59%) | Quality 5.32dB (25%)
-/// ```
-///
-/// Hex number after `NO-LOCK` this is tuner status bit flags:
-/// - 0x01 - has signal
-/// - 0x02 - has carrier
-/// - 0x04 - has viterbi
-/// - 0x08 - has sync
-/// - 0x10 - has lock
-/// - 0x20 - timed-out
-/// - 0x40 - re-init
-///
-/// Tuner has lock
-///
-/// ```text
-/// LOCK dvb-s2 | Signal -38.56dBm (59%) | Quality 14.57dB (70%) | BER:0 | UNC:0
-/// ```
-impl fmt::Display for FeStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl FeStatus {
+    /// Returns frontend status summary line.
+    ///
+    /// Tuner is turned off:
+    ///
+    /// ```text
+    /// OFF
+    /// ```
+    ///
+    /// Tuner acquiring signal but has no lock:
+    ///
+    /// ```text
+    /// NO-LOCK 0x01 | Signal -38.56dBm (59%)
+    /// NO-LOCK 0x03 | Signal -38.56dBm (59%) | Quality 5.32dB (25%)
+    /// ```
+    ///
+    /// Hex number after `NO-LOCK` this is tuner status bit flags:
+    /// - 0x01 - has signal
+    /// - 0x02 - has carrier
+    /// - 0x04 - has viterbi
+    /// - 0x08 - has sync
+    /// - 0x10 - has lock
+    /// - 0x20 - timed-out
+    /// - 0x40 - re-init
+    ///
+    /// Tuner has lock
+    ///
+    /// ```text
+    /// LOCK dvb-s2 | Signal -38.56dBm (59%) | Quality 14.57dB (70%) | BER:0 | UNC:0
+    /// ```
+    pub fn to_status_string(&self) -> String {
         if self.status.is_empty() {
-            write!(f, "OFF")?;
-            return Ok(());
+            return "OFF".to_string();
+        }
+
+        let mut result = Vec::new();
+
+        if self.status.contains(FeStatusFlags::HAS_LOCK) {
+            result.push(format!("LOCK {}", self.delivery_system()));
+        } else {
+            result.push(format!("NO-LOCK 0x{:02X}", self.status.bits()));
+        };
+
+        if self.status.contains(FeStatusFlags::HAS_SIGNAL) {
+            result.push(format!(
+                "Signal {:.02}dBm ({}%)",
+                self.signal_strength_decibel().unwrap_or(0.0),
+                self.signal_strength().unwrap_or(0)
+            ));
+        }
+
+        if self.status.contains(FeStatusFlags::HAS_CARRIER) {
+            result.push(format!(
+                "Quality {:.02}dB ({}%)",
+                self.snr_decibel().unwrap_or(0.0),
+                self.snr().unwrap_or(0)
+            ));
         }
 
         if self.status.contains(FeStatusFlags::HAS_LOCK) {
-            write!(f, "LOCK {}", self.get_delivery_system())?;
-        } else {
-            write!(f, "NO-LOCK 0x{:02X}", self.status.bits())?;
+            let ber = self.ber().map(|v| v.to_string());
+            result.push(format!("BER:{}", ber.as_deref().unwrap_or("-")));
+
+            let unc = self.unc().map(|v| v.to_string());
+            result.push(format!("UNC:{}", unc.as_deref().unwrap_or("-")));
         }
 
-        if !self.status.contains(FeStatusFlags::HAS_SIGNAL) {
-            return Ok(());
-        }
-
-        write!(
-            f,
-            " | Signal {:.02}dBm ({}%)",
-            self.get_signal_strength_decibel().unwrap_or(0.0),
-            self.get_signal_strength().unwrap_or(0)
-        )?;
-
-        if !self.status.contains(FeStatusFlags::HAS_CARRIER) {
-            return Ok(());
-        }
-
-        write!(
-            f,
-            " | Quality {:.02}dB ({}%)",
-            self.get_snr_decibel().unwrap_or(0.0),
-            self.get_snr().unwrap_or(0)
-        )?;
-
-        if !self.status.contains(FeStatusFlags::HAS_LOCK) {
-            return Ok(());
-        }
-
-        write!(f, " | BER:")?;
-        if let Some(ber) = self.get_ber() {
-            write!(f, "{}", ber)?;
-        } else {
-            write!(f, "-")?;
-        }
-
-        write!(f, " | UNC:")?;
-        if let Some(unc) = self.get_unc() {
-            write!(f, "{}", unc)?;
-        } else {
-            write!(f, "-")?;
-        }
-
-        Ok(())
+        result.join(" | ")
     }
-}
 
-impl FeStatus {
     /// Returns current delivery system
-    #[inline]
-    pub fn get_delivery_system(&self) -> DeliverySystem {
+    pub fn delivery_system(&self) -> DeliverySystem {
         let v = unsafe { self.props[IDX_DELIVERY_SYSTEM].u.data };
         DeliverySystem::try_from(v).unwrap_or(DeliverySystem::Undefined)
     }
 
     /// Returns current modulation
     #[inline]
-    pub fn get_modulation(&self) -> Modulation {
+    pub fn modulation(&self) -> Modulation {
         let v = unsafe { self.props[IDX_MODULATION].u.data };
         Modulation::try_from(v).unwrap_or(Modulation::Qpsk)
     }
 
     /// Returns Signal Strength in dBm
-    pub fn get_signal_strength_decibel(&self) -> Option<f64> {
+    pub fn signal_strength_decibel(&self) -> Option<f64> {
         let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[0] };
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
@@ -157,7 +137,7 @@ impl FeStatus {
     }
 
     /// Returns Signal Strength in percentage
-    pub fn get_signal_strength(&self) -> Option<u32> {
+    pub fn signal_strength(&self) -> Option<u32> {
         let stat = unsafe { &self.props[IDX_SIGNAL_STRENGTH].u.st.stat[1] };
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
@@ -167,7 +147,7 @@ impl FeStatus {
     }
 
     /// Returns Signal to noise ratio in dB
-    pub fn get_snr_decibel(&self) -> Option<f64> {
+    pub fn snr_decibel(&self) -> Option<f64> {
         let stat = unsafe { &self.props[IDX_SNR].u.st.stat[0] };
         if stat.scale == FE_SCALE_DECIBEL {
             Some((stat.value as f64) / 1000.0)
@@ -177,7 +157,7 @@ impl FeStatus {
     }
 
     /// Returns Signal Strength in percentage
-    pub fn get_snr(&self) -> Option<u32> {
+    pub fn snr(&self) -> Option<u32> {
         let stat = unsafe { &self.props[IDX_SNR].u.st.stat[1] };
         if stat.scale == FE_SCALE_RELATIVE {
             Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
@@ -187,7 +167,7 @@ impl FeStatus {
     }
 
     /// Returns BER value if available
-    pub fn get_ber(&self) -> Option<u32> {
+    pub fn ber(&self) -> Option<u32> {
         let stat = unsafe { &self.props[IDX_BER].u.st.stat[0] };
         if stat.scale == FE_SCALE_COUNTER {
             Some((stat.value & 0xFFFF_FFFF) as u32)
@@ -197,7 +177,7 @@ impl FeStatus {
     }
 
     /// Returns UNC value if available
-    pub fn get_unc(&self) -> Option<u32> {
+    pub fn unc(&self) -> Option<u32> {
         let stat = unsafe { &self.props[IDX_UNC].u.st.stat[0] };
         if stat.scale == FE_SCALE_COUNTER {
             Some((stat.value & 0xFFFF_FFFF) as u32)
@@ -251,8 +231,8 @@ impl FeStatus {
     }
 
     fn normalize_snr(&mut self) -> Result<()> {
-        let delivery_system = self.get_delivery_system();
-        let modulation = self.get_modulation();
+        let delivery_system = self.delivery_system();
+        let modulation = self.modulation();
 
         let stats = unsafe { &mut self.props[IDX_SNR].u.st };
 

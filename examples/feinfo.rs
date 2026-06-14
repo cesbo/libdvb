@@ -33,5 +33,5 @@ fn main() {
 
     let mut status = FeStatus::default();
     status.read(&fe).unwrap();
-    println!("Status: {}", &status);
+    println!("Status: {}", status.to_status_string());
 }
