@@ -101,7 +101,7 @@ mod fe_type {
 #[derive(Debug)]
 pub struct FeInfo {
     /// Name of the frontend
-    pub name: [std::os::raw::c_char; 128],
+    pub name: [u8; 128],
     /// DEPRECATED: frontend delivery system
     pub fe_type: u32,
     /// Minimal frequency supported by the frontend

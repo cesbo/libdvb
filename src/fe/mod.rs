@@ -101,6 +101,13 @@ impl fmt::Display for ApiVersion {
     }
 }
 
+/// `dtv_properties` ioctl argument: a count plus a pointer to a property array.
+#[repr(C)]
+struct DtvProperties {
+    num: u32,
+    props: *mut DtvPropertyRaw,
+}
+
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {
@@ -194,11 +201,10 @@ impl FeDevice {
         );
         unsafe { ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _) }?;
 
-        if let Some(len) = feinfo.name.iter().position(|&b| b == 0) {
-            let name = unsafe { CStr::from_ptr(feinfo.name[.. len + 1].as_ptr()) };
-            if let Ok(name) = name.to_str() {
-                self.name = name.to_owned();
-            }
+        if let Ok(name) = CStr::from_bytes_until_nul(&feinfo.name)
+            && let Ok(name) = name.to_str()
+        {
+            self.name = name.to_owned();
         }
 
         self.frequency_range = feinfo.frequency_min .. feinfo.frequency_max;
@@ -344,15 +350,9 @@ impl FeDevice {
 
         let raw: Vec<DtvPropertyRaw> = cmdseq.iter().map(DtvProperty::to_raw).collect();
 
-        #[repr(C)]
-        pub struct DtvProperties {
-            num: u32,
-            props: *const DtvPropertyRaw,
-        }
-
         let cmd = DtvProperties {
             num: raw.len() as u32,
-            props: raw.as_ptr(),
+            props: raw.as_ptr() as *mut _,
         };
 
         // FE_SET_PROPERTY
@@ -370,12 +370,6 @@ impl FeDevice {
 
     /// Gets properties from frontend device (raw read path)
     pub(crate) fn get_properties(&self, cmdseq: &mut [DtvPropertyRaw]) -> Result<()> {
-        #[repr(C)]
-        pub struct DtvProperties {
-            num: u32,
-            props: *mut DtvPropertyRaw,
-        }
-
         let mut cmd = DtvProperties {
             num: cmdseq.len() as u32,
             props: cmdseq.as_mut_ptr(),
@@ -596,8 +590,12 @@ impl FeDevice {
     }
 
     /// Returns the current API version
-    #[inline]
     pub fn api_version(&self) -> ApiVersion {
         self.api_version
+    }
+
+    /// Frontend name as reported by `FE_GET_INFO`.
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
