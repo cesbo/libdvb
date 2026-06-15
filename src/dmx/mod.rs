@@ -5,6 +5,7 @@ use std::{
         File,
         OpenOptions,
     },
+    io::Read,
     os::{
         fd::{
             AsFd,
@@ -40,6 +41,17 @@ impl AsFd for DmxDevice {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
+    }
+}
+
+impl Read for DmxDevice {
+    /// Reads filtered data from the demux ring buffer.
+    ///
+    /// The device is opened with `O_NONBLOCK`, so when no data is available
+    /// the call returns an error of kind [`std::io::ErrorKind::WouldBlock`].
+    #[inline]
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        (&self.file).read(buf)
     }
 }
 
