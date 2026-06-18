@@ -137,6 +137,7 @@ fn auto_traits() {
     assert_send_sync::<DtvPropertyRaw>();
     assert_send_sync::<libdvb::FeStatus>();
     assert_send_sync::<libdvb::FeDevice>();
+    assert_send_sync::<libdvb::DvrDevice>();
 }
 
 

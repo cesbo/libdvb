@@ -11,12 +11,9 @@ use std::{
             AsFd,
             BorrowedFd,
         },
-        unix::{
-            fs::OpenOptionsExt,
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+        unix::io::{
+            AsRawFd,
+            RawFd,
         },
     },
 };
@@ -31,14 +28,12 @@ pub struct DmxDevice {
 }
 
 impl AsRawFd for DmxDevice {
-    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
     }
 }
 
 impl AsFd for DmxDevice {
-    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
@@ -46,24 +41,16 @@ impl AsFd for DmxDevice {
 
 impl Read for DmxDevice {
     /// Reads filtered data from the demux ring buffer.
-    ///
-    /// The device is opened with `O_NONBLOCK`, so when no data is available
-    /// the call returns an error of kind [`std::io::ErrorKind::WouldBlock`].
-    #[inline]
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         (&self.file).read(buf)
     }
 }
 
 impl DmxDevice {
-    /// Attempts to open demux device in read-write mode
+    /// Attempts to open a demux device in blocking read-write mode.
     pub fn open(adapter: u32, device: u32) -> Result<Self> {
         let path = format!("/dev/dvb/adapter{}/demux{}", adapter, device);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(&path)?;
+        let file = OpenOptions::new().read(true).write(true).open(&path)?;
 
         let dmx = DmxDevice { file };
 

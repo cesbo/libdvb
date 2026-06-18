@@ -12,12 +12,9 @@ use std::{
             AsFd,
             BorrowedFd,
         },
-        unix::{
-            fs::OpenOptionsExt,
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+        unix::io::{
+            AsRawFd,
+            RawFd,
         },
     },
 };
@@ -38,28 +35,22 @@ pub struct NetDevice {
 }
 
 impl AsRawFd for NetDevice {
-    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
     }
 }
 
 impl AsFd for NetDevice {
-    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
 }
 
 impl NetDevice {
-    /// Attempts to open a network device in read-write mode
+    /// Attempts to open a network device in blocking read-write mode.
     pub fn open(adapter: u32, device: u32) -> Result<NetDevice> {
         let path = format!("/dev/dvb/adapter{}/net{}", adapter, device);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(&path)?;
+        let file = OpenOptions::new().read(true).write(true).open(&path)?;
 
         let net = NetDevice {
             adapter,

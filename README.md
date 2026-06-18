@@ -118,6 +118,25 @@ let filter = DmxPesFilterParams {
 dmx.set_pes_filter(&filter)?;
 ```
 
+## DVR
+
+`DvrDevice` opens `/dev/dvb/adapterN/dvrM` in blocking read-only mode.
+It implements `Read` and can resize the DVR buffer through the DVB
+`DMX_SET_BUFFER_SIZE` ioctl:
+
+```rust
+use std::io::Read;
+
+use libdvb::DvrDevice;
+
+let mut dvr = DvrDevice::open(0, 0)?;
+dvr.set_buffer_size(100 * 188 * 1024)?;
+
+let mut buf = vec![0; 188 * 1024];
+let size = dvr.read(&mut buf)?;
+println!("Read {} bytes", size);
+```
+
 ## NetDevice
 
 Network interfaces are removed automatically when `NetInterface` is dropped.
@@ -134,9 +153,9 @@ println!("MAC: {}", interface.mac());
 
 ## File Descriptors
 
-CA, demux, frontend, and network device handles implement `AsFd` and
-`AsRawFd`, so they can be passed to APIs that operate on borrowed or raw file
-descriptors.
+CA, demux, DVR, frontend, and network device handles open in blocking mode by
+default and implement `AsFd` and `AsRawFd`, so callers can pass them to APIs
+that operate on borrowed or raw file descriptors.
 
 ## Code Formatting
 

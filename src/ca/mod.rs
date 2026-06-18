@@ -16,12 +16,9 @@ use std::{
             AsFd,
             BorrowedFd,
         },
-        unix::{
-            fs::OpenOptionsExt,
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+        unix::io::{
+            AsRawFd,
+            RawFd,
         },
     },
     thread,
@@ -46,14 +43,12 @@ pub struct CaDevice {
 }
 
 impl AsRawFd for CaDevice {
-    #[inline]
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
     }
 }
 
 impl AsFd for CaDevice {
-    #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
     }
@@ -61,7 +56,6 @@ impl AsFd for CaDevice {
 
 impl CaDevice {
     /// Sends reset command to CA device
-    #[inline]
     pub fn reset(&mut self) -> Result<()> {
         // CA_RESET
         nix::ioctl_none!(
@@ -76,7 +70,6 @@ impl CaDevice {
     }
 
     /// Gets CA capabilities
-    #[inline]
     pub fn get_caps(&self, caps: &mut CaCaps) -> Result<()> {
         // CA_GET_CAP
         nix::ioctl_read!(
@@ -92,7 +85,6 @@ impl CaDevice {
     }
 
     /// Gets CA slot information
-    #[inline]
     pub fn get_slot_info(&mut self) -> Result<()> {
         // CA_GET_SLOT_INFO
         nix::ioctl_read!(
@@ -107,14 +99,10 @@ impl CaDevice {
         Ok(())
     }
 
-    /// Attempts to open a CA device
+    /// Attempts to open a CA device in blocking read-write mode.
     pub fn open(adapter: u32, device: u32, slot: u32) -> Result<CaDevice> {
         let path = format!("/dev/dvb/adapter{}/ca{}", adapter, device);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(&path)?;
+        let file = OpenOptions::new().read(true).write(true).open(&path)?;
 
         let mut ca = CaDevice {
             adapter,

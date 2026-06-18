@@ -15,10 +15,7 @@ use std::{
             BorrowedFd,
         },
         unix::{
-            fs::{
-                FileTypeExt,
-                OpenOptionsExt,
-            },
+            fs::FileTypeExt,
             io::{
                 AsRawFd,
                 RawFd,
@@ -30,9 +27,15 @@ use std::{
 pub use status::FeStatus;
 
 use self::sys::*;
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    fd::{
+        file_status_flags,
+        set_file_status_flags,
+    },
 };
 
 /// Typed DVBv5 property used to build a frontend command sequence.
@@ -144,13 +147,17 @@ impl FeDevice {
         ];
         self.set_properties(&cmdseq)?;
 
-        let mut event = FeEvent::default();
+        let original_flags = file_status_flags(self.as_raw_fd())?;
+        set_file_status_flags(self.as_raw_fd(), original_flags | ::nix::libc::O_NONBLOCK)?;
 
+        let mut event = FeEvent::default();
         for _ in 0 .. FE_MAX_EVENT {
             if self.get_event(&mut event).is_err() {
                 break;
             }
         }
+
+        set_file_status_flags(self.as_raw_fd(), original_flags)?;
 
         Ok(())
     }
@@ -210,11 +217,7 @@ impl FeDevice {
 
     fn open(adapter: u32, device: u32, is_write: bool) -> Result<FeDevice> {
         let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(is_write)
-            .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(&path)?;
+        let file = OpenOptions::new().read(true).write(is_write).open(&path)?;
 
         if !file.metadata()?.file_type().is_char_device() {
             return Err(Error::InvalidProperty(format!(
@@ -240,12 +243,12 @@ impl FeDevice {
         Ok(fe)
     }
 
-    /// Attempts to open frontend device in read-only mode
+    /// Attempts to open a frontend device in blocking read-only mode.
     pub fn open_ro(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, false)
     }
 
-    /// Attempts to open frontend device in read-write mode
+    /// Attempts to open a frontend device in blocking read-write mode.
     pub fn open_rw(adapter: u32, device: u32) -> Result<FeDevice> {
         Self::open(adapter, device, true)
     }
