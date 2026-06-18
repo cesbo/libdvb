@@ -13,5 +13,10 @@ pub use fe::{
     DtvProperty,
     FeDevice,
     FeStatus,
+    SecCommand,
+    diseqc_1_0_sequence,
+    diseqc_1_1_sequence,
+    parse_sec_sequence,
+    toneburst_sequence,
 };
 pub use net::NetDevice;

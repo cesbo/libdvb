@@ -1,3 +1,4 @@
+pub mod sec;
 mod status;
 pub mod sys;
 
@@ -24,6 +25,13 @@ use std::{
     },
 };
 
+pub use sec::{
+    SecCommand,
+    diseqc_1_0_sequence,
+    diseqc_1_1_sequence,
+    parse_sec_sequence,
+    toneburst_sequence,
+};
 pub use status::FeStatus;
 
 use self::sys::*;
@@ -544,8 +552,15 @@ impl FeDevice {
     ///     - 000x - bit is set on SecTone::On
     ///
     pub fn diseqc_master_cmd(&self, msg: &[u8]) -> Result<()> {
+        let len = msg.len();
+        if len < 3 || len > 6 {
+            return Err(Error::InvalidData(format!(
+                "DiSEqC master command length must be 3..=6 bytes, got {}",
+                msg.len()
+            )));
+        }
+
         let mut cmd = DiseqcMasterCmd::default();
-        debug_assert!(msg.len() <= cmd.msg.len());
 
         cmd.msg[0 .. msg.len()].copy_from_slice(msg);
         cmd.len = msg.len() as u8;
@@ -553,6 +568,21 @@ impl FeDevice {
         // FE_DISEQC_SEND_MASTER_CMD
         nix::ioctl_write_ptr!(ioctl_call, b'o', 63, DiseqcMasterCmd);
         unsafe { ioctl_call(self.as_raw_fd(), &cmd as *const _) }?;
+
+        Ok(())
+    }
+
+    /// Executes a DiSEqC/SEC command sequence.
+    pub fn execute_sec_sequence(&self, sequence: &[SecCommand]) -> Result<()> {
+        for command in sequence {
+            match command {
+                SecCommand::SetTone(value) => self.set_tone(*value)?,
+                SecCommand::SetVoltage(value) => self.set_voltage(*value)?,
+                SecCommand::SendBurst(value) => self.diseqc_send_burst(*value)?,
+                SecCommand::SendMasterCommand(msg) => self.diseqc_master_cmd(msg)?,
+                SecCommand::Wait(duration) => std::thread::sleep(*duration),
+            }
+        }
 
         Ok(())
     }
