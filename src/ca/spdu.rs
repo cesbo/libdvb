@@ -11,9 +11,9 @@ pub use ca_spdu_status::*;
 pub use ca_spdu_tag::*;
 
 use super::{
+    CaDevice,
     apdu,
     tpdu,
-    CaDevice,
 };
 use crate::error::{
     Error,

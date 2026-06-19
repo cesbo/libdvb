@@ -7,15 +7,15 @@ Supports three types of delivery systems:
 - Satellite: DVB-S, DVB-S2
 - Terrestrial: DVB-T, DVB-T2, ATSC, ISDB-T
 - Cable: DVB-C
+- DiSEqC 1.0
+- DiSEqC 1.1
+- EN 50494 - Unicable I
+- EN 50607 - Unicable II
 
 TODO:
 
 - Cenelec EN 50221 - Common Interface Specification for Conditional Access and
   other Digital Video Broadcasting Decoder Applications
-- DiSEqC 1.0
-- DiSEqC 1.1
-- EN 50494 - Unicable I
-- EN 50607 - Unicable II
 
 ## FeDevice
 

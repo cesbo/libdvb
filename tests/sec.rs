@@ -1,17 +1,26 @@
 use std::time::Duration;
 
 use libdvb::fe::{
-    SecCommand, diseqc_1_0_sequence, diseqc_1_1_sequence, parse_sec_sequence,
-    sys::{SecMiniCmd, SecTone, SecVoltage},
-    toneburst_sequence,
+    DiseqcConfig,
+    DiseqcSwitchConfig,
+    SecCommand,
+    ToneburstConfig,
+    UnicableConfig,
+    diseqc_sequence,
+    sys::{
+        SecMiniCmd,
+        SecTone,
+        SecVoltage,
+    },
 };
 
 #[test]
-fn parse_diseqc_dsl_sequence() {
-    let sequence = parse_sec_sequence("t V W200 [E0 10 38 F3] W15 T").unwrap();
+fn diseqc_dsl_sequence_generates_sec_commands() {
+    let tune =
+        diseqc_sequence(DiseqcConfig::Dsl("t V W200 [E0 10 38 F3] W15 T".to_owned())).unwrap();
 
     assert_eq!(
-        sequence,
+        tune.sec_sequence,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(SecVoltage::V18),
@@ -24,35 +33,45 @@ fn parse_diseqc_dsl_sequence() {
 }
 
 #[test]
-fn parse_compact_and_spaced_hex() {
-    let compact = parse_sec_sequence("[E01038F0]").unwrap();
-    let spaced = parse_sec_sequence("[E0 10 38 F0]").unwrap();
+fn diseqc_dsl_accepts_compact_and_spaced_hex() {
+    let compact = diseqc_sequence(DiseqcConfig::Dsl("[E01038F0]".to_owned())).unwrap();
+    let spaced = diseqc_sequence(DiseqcConfig::Dsl("[E0 10 38 F0]".to_owned())).unwrap();
 
     assert_eq!(
-        compact,
+        compact.sec_sequence,
         vec![SecCommand::SendMasterCommand(vec![0xE0, 0x10, 0x38, 0xF0])]
     );
-    assert_eq!(compact, spaced);
+    assert_eq!(compact.sec_sequence, spaced.sec_sequence);
 }
 
 #[test]
-fn parse_rejects_invalid_sequences() {
-    assert!(parse_sec_sequence("W").is_err());
-    assert!(parse_sec_sequence("[E0 10 38 F]").is_err());
-    assert!(parse_sec_sequence("[E0 10]").is_err());
-    assert!(parse_sec_sequence("[E0 10 38 F0 00 00 00]").is_err());
-    assert!(parse_sec_sequence("[E0 10 38 X0]").is_err());
-    assert!(parse_sec_sequence("[E0 10 38 F0").is_err());
-    assert!(parse_sec_sequence("[E 0 10 38]").is_err());
-    assert!(parse_sec_sequence("x").is_err());
+fn diseqc_dsl_rejects_invalid_sequences() {
+    for input in [
+        "W",
+        "[E0 10 38 F]",
+        "[E0 10]",
+        "[E0 10 38 F0 00 00 00]",
+        "[E0 10 38 X0]",
+        "[E0 10 38 F0",
+        "[E 0 10 38]",
+        "x",
+    ] {
+        assert!(diseqc_sequence(DiseqcConfig::Dsl(input.to_owned())).is_err());
+    }
 }
 
 #[test]
 fn diseqc_1_0_builder_generates_committed_switch_bytes() {
-    let sequence = diseqc_1_0_sequence(4, SecVoltage::V18, SecTone::On).unwrap();
+    let tune = diseqc_sequence(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+        port: 4,
+        voltage: SecVoltage::V18,
+        tone: SecTone::On,
+    }))
+    .unwrap();
 
+    assert_eq!(tune.frontend_frequency_khz, None);
     assert_eq!(
-        sequence,
+        tune.sec_sequence,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(SecVoltage::V18),
@@ -63,16 +82,36 @@ fn diseqc_1_0_builder_generates_committed_switch_bytes() {
         ]
     );
 
-    assert!(diseqc_1_0_sequence(0, SecVoltage::V13, SecTone::Off).is_err());
-    assert!(diseqc_1_0_sequence(5, SecVoltage::V13, SecTone::Off).is_err());
+    assert!(
+        diseqc_sequence(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+            port: 0,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+        }))
+        .is_err()
+    );
+    assert!(
+        diseqc_sequence(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+            port: 5,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+        }))
+        .is_err()
+    );
 }
 
 #[test]
 fn diseqc_1_1_builder_generates_uncommitted_switch_bytes() {
-    let sequence = diseqc_1_1_sequence(16, SecVoltage::V13, SecTone::Off).unwrap();
+    let tune = diseqc_sequence(DiseqcConfig::Switch1_1(DiseqcSwitchConfig {
+        port: 16,
+        voltage: SecVoltage::V13,
+        tone: SecTone::Off,
+    }))
+    .unwrap();
 
+    assert_eq!(tune.frontend_frequency_khz, None);
     assert_eq!(
-        sequence,
+        tune.sec_sequence,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(SecVoltage::V13),
@@ -83,16 +122,36 @@ fn diseqc_1_1_builder_generates_uncommitted_switch_bytes() {
         ]
     );
 
-    assert!(diseqc_1_1_sequence(0, SecVoltage::V13, SecTone::Off).is_err());
-    assert!(diseqc_1_1_sequence(17, SecVoltage::V13, SecTone::Off).is_err());
+    assert!(
+        diseqc_sequence(DiseqcConfig::Switch1_1(DiseqcSwitchConfig {
+            port: 0,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+        }))
+        .is_err()
+    );
+    assert!(
+        diseqc_sequence(DiseqcConfig::Switch1_1(DiseqcSwitchConfig {
+            port: 17,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+        }))
+        .is_err()
+    );
 }
 
 #[test]
 fn toneburst_builder_generates_mini_burst_sequence() {
-    let sequence = toneburst_sequence(SecMiniCmd::B, SecVoltage::V18, SecTone::On);
+    let tune = diseqc_sequence(DiseqcConfig::Toneburst(ToneburstConfig {
+        burst: SecMiniCmd::B,
+        voltage: SecVoltage::V18,
+        tone: SecTone::On,
+    }))
+    .unwrap();
 
+    assert_eq!(tune.frontend_frequency_khz, None);
     assert_eq!(
-        sequence,
+        tune.sec_sequence,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(SecVoltage::V18),
@@ -101,5 +160,144 @@ fn toneburst_builder_generates_mini_burst_sequence() {
             SecCommand::Wait(Duration::from_millis(15)),
             SecCommand::SetTone(SecTone::On),
         ]
+    );
+}
+
+#[test]
+fn unicable_1_builder_generates_en50494_bytes() {
+    let tune = diseqc_sequence(DiseqcConfig::Unicable1(UnicableConfig {
+        slot: 3,
+        frequency_mhz: 1232,
+        user_band_frequency_mhz: 1210,
+        position: 1,
+        voltage: SecVoltage::V18,
+        tone: SecTone::On,
+        pin: None,
+    }))
+    .unwrap();
+
+    assert_eq!(tune.frontend_frequency_khz, Some(1_210_000));
+    assert_eq!(
+        tune.sec_sequence,
+        vec![
+            SecCommand::SetVoltage(SecVoltage::V13),
+            SecCommand::SetTone(SecTone::Off),
+            SecCommand::Wait(Duration::from_millis(5)),
+            SecCommand::SetVoltage(SecVoltage::V18),
+            SecCommand::Wait(Duration::from_millis(15)),
+            SecCommand::SendMasterCommand(vec![0xE0, 0x10, 0x5A, 0x5D, 0x05]),
+            SecCommand::Wait(Duration::from_millis(50)),
+            SecCommand::SetVoltage(SecVoltage::V13),
+        ]
+    );
+
+    assert!(
+        diseqc_sequence(DiseqcConfig::Unicable1(UnicableConfig {
+            slot: 0,
+            frequency_mhz: 1232,
+            user_band_frequency_mhz: 1210,
+            position: 0,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            pin: None,
+        }))
+        .is_err()
+    );
+    assert!(
+        diseqc_sequence(DiseqcConfig::Unicable1(UnicableConfig {
+            slot: 1,
+            frequency_mhz: 1232,
+            user_band_frequency_mhz: 1210,
+            position: 2,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            pin: None,
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn unicable_2_builder_generates_en50607_bytes() {
+    let tune = diseqc_sequence(DiseqcConfig::Unicable2(UnicableConfig {
+        slot: 32,
+        frequency_mhz: 1234,
+        user_band_frequency_mhz: 1210,
+        position: 15,
+        voltage: SecVoltage::V18,
+        tone: SecTone::On,
+        pin: Some(0x44),
+    }))
+    .unwrap();
+
+    assert_eq!(tune.frontend_frequency_khz, Some(1_210_000));
+    assert_eq!(
+        tune.sec_sequence,
+        vec![
+            SecCommand::SetVoltage(SecVoltage::V13),
+            SecCommand::SetTone(SecTone::Off),
+            SecCommand::Wait(Duration::from_millis(5)),
+            SecCommand::SetVoltage(SecVoltage::V18),
+            SecCommand::Wait(Duration::from_millis(15)),
+            SecCommand::SendMasterCommand(vec![0x71, 0xFC, 0x6E, 0x3F, 0x44]),
+            SecCommand::Wait(Duration::from_millis(50)),
+            SecCommand::SetVoltage(SecVoltage::V13),
+        ]
+    );
+
+    let tune = diseqc_sequence(DiseqcConfig::Unicable2(UnicableConfig {
+        slot: 1,
+        frequency_mhz: 950,
+        user_band_frequency_mhz: 980,
+        position: 0,
+        voltage: SecVoltage::V13,
+        tone: SecTone::Off,
+        pin: None,
+    }))
+    .unwrap();
+
+    assert_eq!(
+        tune.sec_sequence[5],
+        SecCommand::SendMasterCommand(vec![0x70, 0x03, 0x52, 0x00])
+    );
+}
+
+#[test]
+fn unicable_2_builder_rejects_invalid_values() {
+    assert!(
+        diseqc_sequence(DiseqcConfig::Unicable2(UnicableConfig {
+            slot: 33,
+            frequency_mhz: 1234,
+            user_band_frequency_mhz: 1210,
+            position: 0,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            pin: None,
+        }))
+        .is_err()
+    );
+    assert!(
+        diseqc_sequence(DiseqcConfig::Unicable2(UnicableConfig {
+            slot: 1,
+            frequency_mhz: 1234,
+            user_band_frequency_mhz: 1210,
+            position: 64,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            pin: None,
+        }))
+        .is_err()
+    );
+    assert!(
+        diseqc_sequence(DiseqcConfig::Unicable2(UnicableConfig {
+            slot: 1,
+            frequency_mhz: 2200,
+            user_band_frequency_mhz: 1210,
+            position: 0,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            pin: None,
+        }))
+        .is_err()
     );
 }

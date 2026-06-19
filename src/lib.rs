@@ -10,13 +10,15 @@ mod fd;
 pub use dvr::DvrDevice;
 pub use fe::{
     ApiVersion,
+    DiseqcConfig,
+    DiseqcSwitchConfig,
+    DiseqcTune,
     DtvProperty,
     FeDevice,
     FeStatus,
     SecCommand,
-    diseqc_1_0_sequence,
-    diseqc_1_1_sequence,
-    parse_sec_sequence,
-    toneburst_sequence,
+    ToneburstConfig,
+    UnicableConfig,
+    diseqc_sequence,
 };
 pub use net::NetDevice;

@@ -26,11 +26,13 @@ use std::{
 };
 
 pub use sec::{
+    DiseqcConfig,
+    DiseqcSwitchConfig,
+    DiseqcTune,
     SecCommand,
-    diseqc_1_0_sequence,
-    diseqc_1_1_sequence,
-    parse_sec_sequence,
-    toneburst_sequence,
+    ToneburstConfig,
+    UnicableConfig,
+    diseqc_sequence,
 };
 pub use status::FeStatus;
 
@@ -552,8 +554,7 @@ impl FeDevice {
     ///     - 000x - bit is set on SecTone::On
     ///
     pub fn diseqc_master_cmd(&self, msg: &[u8]) -> Result<()> {
-        let len = msg.len();
-        if len < 3 || len > 6 {
+        if !(3 ..= 6).contains(&msg.len()) {
             return Err(Error::InvalidData(format!(
                 "DiSEqC master command length must be 3..=6 bytes, got {}",
                 msg.len()

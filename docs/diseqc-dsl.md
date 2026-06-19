@@ -2,8 +2,8 @@
 
 libdvb accepts SEC/DiSEqC control sequences written as a short text DSL. A
 sequence is a list of single-letter commands, optionally separated by
-whitespace, that is parsed into a `Vec<SecCommand>` and then executed against a
-frontend.
+whitespace. Pass it through `DiseqcConfig::Dsl` to build a sequence that can be
+executed against a frontend.
 
 ```text
 t V W200 [E0 10 38 F3] W15 T
@@ -54,73 +54,44 @@ A typical committed-switch command looks like `[E0 10 38 Fx]`:
 - byte 3 `38` — command (write to port group 0, "committed")
 - byte 4 `Fx` — data, where the low nibble encodes port, voltage and tone
 
-## Parsing
+## Using DSL
 
 ```rust
-use libdvb::fe::parse_sec_sequence;
-
-let sequence = parse_sec_sequence("t V W200 [E0 10 38 F3] W15 T")?;
-```
-
-This yields:
-
-```rust
-use std::time::Duration;
-use libdvb::fe::{
-    SecCommand,
-    sys::{SecTone, SecVoltage},
-};
-
-vec![
-    SecCommand::SetTone(SecTone::Off),
-    SecCommand::SetVoltage(SecVoltage::V18),
-    SecCommand::Wait(Duration::from_millis(200)),
-    SecCommand::SendMasterCommand(vec![0xE0, 0x10, 0x38, 0xF3]),
-    SecCommand::Wait(Duration::from_millis(15)),
-    SecCommand::SetTone(SecTone::On),
-];
-```
-
-`SecCommand` variants:
-
-- `SetTone(SecTone)` — `t` / `T`
-- `SetVoltage(SecVoltage)` — `v` / `V`
-- `SendBurst(SecMiniCmd)` — `A` / `B`
-- `SendMasterCommand(Vec<u8>)` — `[hex ...]`
-- `Wait(Duration)` — `W<number>`
-
-## Executing
-
-A parsed sequence is run against an open frontend with
-[`FeDevice::execute_sec_sequence`]. Each command maps directly to a frontend
-operation, and `Wait` sleeps the current thread for the given duration:
-
-```rust
-use libdvb::FeDevice;
-use libdvb::fe::parse_sec_sequence;
+use libdvb::{DiseqcConfig, FeDevice, diseqc_sequence};
 
 let fe = FeDevice::open_rw(0, 0)?;
-let sequence = parse_sec_sequence("t V W200 [E0 10 38 F3] W15 T")?;
-fe.execute_sec_sequence(&sequence)?;
+let tune = diseqc_sequence(DiseqcConfig::Dsl(
+    "t V W200 [E0 10 38 F3] W15 T".to_owned(),
+))?;
+fe.execute_sec_sequence(&tune.sec_sequence)?;
 ```
 
-## Builders
+`diseqc_sequence` parses and validates the DSL internally. A DSL sequence does
+not change the frontend frequency, so `tune.frontend_frequency_khz` is `None`.
 
-For the common cases you do not need to hand-write the DSL. These helpers
-return the same `Vec<SecCommand>` ready to pass to `execute_sec_sequence`:
+## Built-in configurations
 
-- `diseqc_1_0_sequence(port, voltage, tone)` - DiSEqC 1.0 committed switch,
-  ports `1..=4`.
-- `diseqc_1_1_sequence(port, voltage, tone)` - DiSEqC 1.1 uncommitted switch,
-  ports `1..=16`.
-- `toneburst_sequence(burst, voltage, tone)` - mini A/B tone burst.
+`DiseqcConfig` also provides typed configurations for common commands:
+
+- `Switch1_0(DiseqcSwitchConfig)` - DiSEqC 1.0 committed switch, ports
+  `1..=4`.
+- `Switch1_1(DiseqcSwitchConfig)` - DiSEqC 1.1 uncommitted switch, ports
+  `1..=16`.
+- `Toneburst(ToneburstConfig)` - mini A/B tone burst.
+- `Unicable1(UnicableConfig)` - EN 50494.
+- `Unicable2(UnicableConfig)` - EN 50607.
 
 ```rust
 use libdvb::fe::{
-    diseqc_1_0_sequence,
+    DiseqcConfig,
+    DiseqcSwitchConfig,
+    diseqc_sequence,
     sys::{SecTone, SecVoltage},
 };
 
-// Select committed port 4 at 18V with the tone left on afterwards.
-let sequence = diseqc_1_0_sequence(4, SecVoltage::V18, SecTone::On)?;
+let tune = diseqc_sequence(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+    port: 4,
+    voltage: SecVoltage::V18,
+    tone: SecTone::On,
+}))?;
 ```

@@ -15,9 +15,9 @@ use std::io::Write;
 pub use ca_tpdu_tag::*;
 
 use super::{
+    CaDevice,
     asn1,
     spdu,
-    CaDevice,
 };
 use crate::error::{
     Error,
