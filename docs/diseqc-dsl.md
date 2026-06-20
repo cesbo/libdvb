@@ -2,8 +2,7 @@
 
 libdvb accepts SEC/DiSEqC control sequences written as a short text DSL. A
 sequence is a list of single-letter commands, optionally separated by
-whitespace. Pass it through `DiseqcConfig::Dsl` to build a sequence that can be
-executed against a frontend.
+whitespace. Pass it through `DiseqcConfig::Dsl` to apply it to a frontend.
 
 ```text
 t V W200 [E0 10 38 F3] W15 T
@@ -57,17 +56,17 @@ A typical committed-switch command looks like `[E0 10 38 Fx]`:
 ## Using DSL
 
 ```rust
-use libdvb::{DiseqcConfig, FeDevice, diseqc_sequence};
+use libdvb::{DiseqcConfig, FeDevice};
 
 let fe = FeDevice::open_rw(0, 0)?;
-let tune = diseqc_sequence(DiseqcConfig::Dsl(
+let _frontend_frequency_khz = fe.use_diseqc(DiseqcConfig::Dsl(
     "t V W200 [E0 10 38 F3] W15 T".to_owned(),
 ))?;
-fe.execute_sec_sequence(&tune.sec_sequence)?;
 ```
 
-`diseqc_sequence` parses and validates the DSL internally. A DSL sequence does
-not change the frontend frequency, so `tune.frontend_frequency_khz` is `None`.
+`FeDevice::use_diseqc` parses and validates the DSL internally. A DSL sequence
+does not change the frontend frequency, so it returns `None`. Unicable
+configurations return the calculated frontend frequency in kHz.
 
 ## Built-in configurations
 
@@ -82,14 +81,15 @@ not change the frontend frequency, so `tune.frontend_frequency_khz` is `None`.
 - `Unicable2(UnicableConfig)` - EN 50607.
 
 ```rust
-use libdvb::fe::{
+use libdvb::{
     DiseqcConfig,
     DiseqcSwitchConfig,
-    diseqc_sequence,
-    sys::{SecTone, SecVoltage},
+    FeDevice,
 };
+use libdvb::fe::sys::{SecTone, SecVoltage};
 
-let tune = diseqc_sequence(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+let fe = FeDevice::open_rw(0, 0)?;
+let _frontend_frequency_khz = fe.use_diseqc(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
     port: 4,
     voltage: SecVoltage::V18,
     tone: SecTone::On,

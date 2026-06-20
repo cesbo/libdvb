@@ -573,9 +573,14 @@ impl FeDevice {
         Ok(())
     }
 
-    /// Executes a DiSEqC/SEC command sequence.
-    pub fn execute_sec_sequence(&self, sequence: &[SecCommand]) -> Result<()> {
-        for command in sequence {
+    /// Applies a DiSEqC configuration to the frontend.
+    ///
+    /// Returns the frontend frequency in kHz selected by a Unicable
+    /// configuration. Other configurations return `None`.
+    pub fn use_diseqc(&self, config: DiseqcConfig) -> Result<Option<u32>> {
+        let tune = diseqc_sequence(config)?;
+
+        for command in &tune.sec_sequence {
             match command {
                 SecCommand::SetTone(value) => self.set_tone(*value)?,
                 SecCommand::SetVoltage(value) => self.set_voltage(*value)?,
@@ -585,7 +590,7 @@ impl FeDevice {
             }
         }
 
-        Ok(())
+        Ok(tune.frontend_frequency_khz)
     }
 
     /// Returns the current API version
