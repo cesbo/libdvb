@@ -575,10 +575,10 @@ impl FeDevice {
 
     /// Applies a DiSEqC configuration to the frontend.
     ///
-    /// Returns the frontend frequency in kHz selected by a Unicable
-    /// configuration. Other configurations return `None`.
-    pub fn use_diseqc(&self, config: DiseqcConfig) -> Result<Option<u32>> {
-        let tune = diseqc_sequence(config)?;
+    /// `frequency_mhz` is the requested transponder frequency. Returns the
+    /// resulting frontend frequency in kHz after any Unicable translation.
+    pub fn use_diseqc(&self, frequency_mhz: u32, config: DiseqcConfig) -> Result<u32> {
+        let tune = diseqc_sequence(frequency_mhz, config)?;
 
         for command in &tune.sec_sequence {
             match command {

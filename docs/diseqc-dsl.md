@@ -59,14 +59,16 @@ A typical committed-switch command looks like `[E0 10 38 Fx]`:
 use libdvb::{DiseqcConfig, FeDevice};
 
 let fe = FeDevice::open_rw(0, 0)?;
-let _frontend_frequency_khz = fe.use_diseqc(DiseqcConfig::Dsl(
+let frontend_frequency_khz = fe.use_diseqc(12_320, DiseqcConfig::Dsl(
     "t V W200 [E0 10 38 F3] W15 T".to_owned(),
 ))?;
 ```
 
-`FeDevice::use_diseqc` parses and validates the DSL internally. A DSL sequence
-does not change the frontend frequency, so it returns `None`. Unicable
-configurations return the calculated frontend frequency in kHz.
+`FeDevice::use_diseqc` parses and validates the DSL internally. Its first
+argument is the requested transponder frequency in MHz, and it returns the
+frontend frequency in kHz. DSL, switching, and toneburst configurations retain
+the requested frequency; Unicable configurations return the user-band
+frequency.
 
 ## Built-in configurations
 
@@ -89,7 +91,7 @@ use libdvb::{
 use libdvb::fe::sys::{SecTone, SecVoltage};
 
 let fe = FeDevice::open_rw(0, 0)?;
-let _frontend_frequency_khz = fe.use_diseqc(DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
+let frontend_frequency_khz = fe.use_diseqc(12_320, DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
     port: 4,
     voltage: SecVoltage::V18,
     tone: SecTone::On,

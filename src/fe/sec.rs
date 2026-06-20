@@ -48,17 +48,10 @@ pub struct ToneburstConfig {
 }
 
 /// Common inputs for Unicable channel-change commands.
-///
-/// `frequency_mhz` is the satellite IF/L-band frequency before Unicable
-/// translation. The returned [`DiseqcTune::frontend_frequency_khz`] should be
-/// used as the frontend tuning frequency after sending the SEC sequence when it
-/// is `Some`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnicableConfig {
     /// User band / SCR slot number. Valid range depends on the protocol.
     pub slot: u8,
-    /// Requested transponder frequency in MHz.
-    pub frequency_mhz: u32,
     /// User band center frequency in MHz.
     pub user_band_frequency_mhz: u32,
     /// Satellite position index.
@@ -88,11 +81,11 @@ pub enum DiseqcConfig {
     Dsl(String),
 }
 
-/// Generated SEC sequence plus an optional frontend frequency override.
+/// Generated SEC sequence and the resulting frontend frequency.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiseqcTune {
     /// Frontend frequency after DiSEqC translation, in kHz.
-    pub frontend_frequency_khz: Option<u32>,
+    pub frontend_frequency_khz: u32,
     /// SEC commands that perform the selected DiSEqC setup.
     pub sec_sequence: Vec<SecCommand>,
 }
@@ -115,19 +108,21 @@ fn parse_sec_sequence(input: &str) -> Result<Vec<SecCommand>> {
 }
 
 /// Builds a SEC sequence for a high-level DiSEqC setup mode.
-pub fn diseqc_sequence(config: DiseqcConfig) -> Result<DiseqcTune> {
+///
+/// `frequency_mhz` is the requested transponder frequency.
+pub fn diseqc_sequence(frequency_mhz: u32, config: DiseqcConfig) -> Result<DiseqcTune> {
     match config {
-        DiseqcConfig::Switch1_0(config) => diseqc_1_0_sequence(config),
-        DiseqcConfig::Switch1_1(config) => diseqc_1_1_sequence(config),
-        DiseqcConfig::Toneburst(config) => toneburst_sequence(config),
-        DiseqcConfig::Unicable1(config) => unicable_1_sequence(config),
-        DiseqcConfig::Unicable2(config) => unicable_2_sequence(config),
-        DiseqcConfig::Dsl(input) => Ok(diseqc_tune(None, parse_sec_sequence(&input)?)),
+        DiseqcConfig::Switch1_0(config) => diseqc_1_0_sequence(frequency_mhz, config),
+        DiseqcConfig::Switch1_1(config) => diseqc_1_1_sequence(frequency_mhz, config),
+        DiseqcConfig::Toneburst(config) => toneburst_sequence(frequency_mhz, config),
+        DiseqcConfig::Unicable1(config) => unicable_1_sequence(frequency_mhz, config),
+        DiseqcConfig::Unicable2(config) => unicable_2_sequence(frequency_mhz, config),
+        DiseqcConfig::Dsl(input) => Ok(diseqc_tune(frequency_mhz, parse_sec_sequence(&input)?)),
     }
 }
 
 /// Builds a DiSEqC 1.0 committed-switch sequence.
-fn diseqc_1_0_sequence(config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
+fn diseqc_1_0_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
     if !(1 ..= 4).contains(&config.port) {
         return Err(Error::InvalidData(format!(
             "DiSEqC 1.0 port must be in range 1..=4, got {}",
@@ -150,13 +145,13 @@ fn diseqc_1_0_sequence(config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
         });
 
     Ok(diseqc_tune(
-        None,
+        frequency_mhz,
         controlled_master_sequence(config.voltage, config.tone, [0xE0, 0x10, 0x38, data]),
     ))
 }
 
 /// Builds a DiSEqC 1.1 uncommitted-switch sequence.
-fn diseqc_1_1_sequence(config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
+fn diseqc_1_1_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
     if !(1 ..= 16).contains(&config.port) {
         return Err(Error::InvalidData(format!(
             "DiSEqC 1.1 port must be in range 1..=16, got {}",
@@ -168,15 +163,15 @@ fn diseqc_1_1_sequence(config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
     let data = 0xF0 | port;
 
     Ok(diseqc_tune(
-        None,
+        frequency_mhz,
         controlled_master_sequence(config.voltage, config.tone, [0xE0, 0x10, 0x39, data]),
     ))
 }
 
 /// Builds a toneburst A/B sequence.
-fn toneburst_sequence(config: ToneburstConfig) -> Result<DiseqcTune> {
+fn toneburst_sequence(frequency_mhz: u32, config: ToneburstConfig) -> Result<DiseqcTune> {
     Ok(diseqc_tune(
-        None,
+        frequency_mhz,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(config.voltage),
@@ -189,7 +184,7 @@ fn toneburst_sequence(config: ToneburstConfig) -> Result<DiseqcTune> {
 }
 
 /// Builds a Unicable I / EN 50494 channel-change sequence.
-fn unicable_1_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
+fn unicable_1_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<DiseqcTune> {
     if !(1 ..= 8).contains(&config.slot) {
         return Err(Error::InvalidData(format!(
             "Unicable I slot must be in range 1..=8, got {}",
@@ -203,8 +198,7 @@ fn unicable_1_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
         )));
     }
 
-    let x = config
-        .frequency_mhz
+    let x = frequency_mhz
         .checked_add(config.user_band_frequency_mhz)
         .and_then(|v| v.checked_add(2))
         .map(|v| v / 4)
@@ -226,13 +220,13 @@ fn unicable_1_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
     let b2 = x as u8;
 
     Ok(unicable_tune(
-        frontend_frequency_khz(config.user_band_frequency_mhz)?,
+        config.user_band_frequency_mhz,
         vec![0xE0, 0x10, 0x5A, b1, b2],
     ))
 }
 
 /// Builds a Unicable II / EN 50607 channel-change sequence.
-fn unicable_2_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
+fn unicable_2_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<DiseqcTune> {
     if !(1 ..= 32).contains(&config.slot) {
         return Err(Error::InvalidData(format!(
             "Unicable II slot must be in range 1..=32, got {}",
@@ -246,8 +240,7 @@ fn unicable_2_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
         )));
     }
 
-    let x = config
-        .frequency_mhz
+    let x = frequency_mhz
         .checked_sub(100)
         .ok_or_else(|| Error::InvalidData("Unicable II frequency is out of range".to_owned()))?;
 
@@ -271,10 +264,7 @@ fn unicable_2_sequence(config: UnicableConfig) -> Result<DiseqcTune> {
         msg.push(pin);
     }
 
-    Ok(unicable_tune(
-        frontend_frequency_khz(config.user_band_frequency_mhz)?,
-        msg,
-    ))
+    Ok(unicable_tune(config.user_band_frequency_mhz, msg))
 }
 
 fn controlled_master_sequence<const N: usize>(
@@ -292,25 +282,16 @@ fn controlled_master_sequence<const N: usize>(
     ]
 }
 
-fn frontend_frequency_khz(user_band_frequency_mhz: u32) -> Result<u32> {
-    user_band_frequency_mhz.checked_mul(1000).ok_or_else(|| {
-        Error::InvalidData(format!(
-            "Unicable user-band frequency is too large: {} MHz",
-            user_band_frequency_mhz
-        ))
-    })
-}
-
-fn diseqc_tune(frontend_frequency_khz: Option<u32>, sec_sequence: Vec<SecCommand>) -> DiseqcTune {
+fn diseqc_tune(frequency_mhz: u32, sec_sequence: Vec<SecCommand>) -> DiseqcTune {
     DiseqcTune {
-        frontend_frequency_khz,
+        frontend_frequency_khz: frequency_mhz * 1000,
         sec_sequence,
     }
 }
 
-fn unicable_tune(frontend_frequency_khz: u32, msg: Vec<u8>) -> DiseqcTune {
+fn unicable_tune(frequency_mhz: u32, msg: Vec<u8>) -> DiseqcTune {
     DiseqcTune {
-        frontend_frequency_khz: Some(frontend_frequency_khz),
+        frontend_frequency_khz: frequency_mhz * 1000,
         sec_sequence: vec![
             SecCommand::SetVoltage(SecVoltage::V13),
             SecCommand::SetTone(SecTone::Off),
