@@ -27,7 +27,7 @@ mod ca_slot_flags {
 
 /// CA slot interface types and info
 #[repr(C)]
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CaSlotInfo {
     /// slot number
     pub slot_num: u32,
@@ -111,8 +111,31 @@ pub struct CaPid {
     pub index: i32,
 }
 
-// pub const CA_GET_DESCR_INFO: IoctlInt = io_read::<CaDescrInfo>(b'o', 131);
-// pub const CA_GET_MSG: IoctlInt = io_read::<CaMsg>(b'o', 132);
-// pub const CA_SEND_MSG: IoctlInt = io_write::<CaMsg>(b'o', 133);
-// pub const CA_SET_DESCR: IoctlInt = io_write::<CaDescr>(b'o', 134);
-// pub const CA_SET_PID: IoctlInt = io_write::<CaPid>(b'o', 135);
+// CA_RESET
+nix::ioctl_none!(
+    /// Resets the CA interface
+    #[inline]
+    ca_reset,
+    b'o',
+    128
+);
+
+// CA_GET_CAP
+nix::ioctl_read!(
+    /// Gets CA interface capabilities
+    #[inline]
+    ca_get_cap,
+    b'o',
+    129,
+    CaCaps
+);
+
+// CA_GET_SLOT_INFO
+nix::ioctl_read!(
+    /// Gets CA slot information
+    #[inline]
+    ca_get_slot_info,
+    b'o',
+    130,
+    CaSlotInfo
+);
