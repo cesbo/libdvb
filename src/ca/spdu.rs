@@ -7,8 +7,6 @@
 
 use std::fmt;
 
-pub use ca_spdu_status::*;
-
 use super::resource::ResourceId;
 use crate::error::{
     Error,
@@ -18,11 +16,11 @@ use crate::error::{
 /// Size of the session_number SPDU header preceding the APDU bytes
 pub const SPDU_HEADER_SIZE: usize = 4;
 
+/// en50221 Table 7: Open Session Status values
+pub const SS_OK: u8 = 0x00;
+pub const SS_NOT_ALLOCATED: u8 = 0xF0;
+
 /// en50221 7.2.7: session tag (one byte on the wire)
-///
-/// A newtype instead of an enum: the module may send any tag value, so
-/// unknown tags must stay representable. The associated constants list
-/// the tags of the session protocol.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpduTag(u8);
 
@@ -62,12 +60,6 @@ impl fmt::Debug for SpduTag {
 
         write!(f, "SpduTag({})", name)
     }
-}
-
-/// en50221 Table 7: Open Session Status values
-mod ca_spdu_status {
-    pub const SS_OK: u8 = 0x00;
-    pub const SS_NOT_ALLOCATED: u8 = 0xF0;
 }
 
 /// Parsed SPDU received from the module (en50221 7.2)

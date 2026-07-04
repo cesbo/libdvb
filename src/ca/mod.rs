@@ -12,6 +12,7 @@ mod resource;
 mod spdu;
 pub mod sys;
 mod tpdu;
+mod transport;
 
 use std::{
     fs::{

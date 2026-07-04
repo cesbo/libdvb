@@ -7,6 +7,7 @@ pub mod net;
 
 mod fd;
 
+pub use ca::CaDevice;
 pub use dvr::DvrDevice;
 pub use fe::{
     ApiVersion,
