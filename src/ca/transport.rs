@@ -1,4 +1,4 @@
-//! en50221 7.1 transport layer: command-response framing over a CiLink
+//! en50221 7.1 transport layer: command-response framing over a [`CaDevice`]
 //!
 //! The transport owns the per-slot outgoing queue and busy flag, the
 //! outgoing fragmentation of oversize SPDUs and the incoming reassembly
@@ -7,7 +7,19 @@
 //! slot; outgoing TPDUs are queued per slot and flushed one at a time on
 //! each read event (driven by the slot manager).
 
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    os::{
+        fd::{
+            AsFd,
+            BorrowedFd,
+        },
+        unix::io::{
+            AsRawFd,
+            RawFd,
+        },
+    },
+};
 
 use super::{
     CaDevice,
@@ -96,7 +108,7 @@ impl TransportSlot {
     }
 }
 
-/// en50221 7.1 transport layer: command-response framing over a [`CiLink`]
+/// en50221 7.1 transport layer: command-response framing over a [`CaDevice`]
 ///
 /// The module never initiates: after every successful write the slot is
 /// busy until the next read event for that slot. Outgoing TPDUs are
@@ -106,6 +118,18 @@ pub struct CiTransport {
     slots: Vec<TransportSlot>,
     /// single read scratch buffer, like the legacy ca_buffer
     rx: Box<[u8; MAX_TPDU_SIZE]>,
+}
+
+impl AsRawFd for CiTransport {
+    fn as_raw_fd(&self) -> RawFd {
+        self.link.as_raw_fd()
+    }
+}
+
+impl AsFd for CiTransport {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.link.as_fd()
+    }
 }
 
 impl CiTransport {

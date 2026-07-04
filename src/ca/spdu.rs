@@ -19,6 +19,10 @@ pub const SPDU_HEADER_SIZE: usize = 4;
 /// en50221 Table 7: Open Session Status values
 pub const SS_OK: u8 = 0x00;
 pub const SS_NOT_ALLOCATED: u8 = 0xF0;
+/// the resource exists but only in a lower version
+pub const SS_LOWER_VERSION: u8 = 0xF2;
+/// the resource exists but is busy (no free session numbers)
+pub const SS_BUSY: u8 = 0xF3;
 
 /// en50221 7.2.7: session tag (one byte on the wire)
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]

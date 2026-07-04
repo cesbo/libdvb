@@ -5,10 +5,19 @@
 //!
 //! - [`CaDevice`] - the kernel CA device (/dev/dvb/adapterN/caN), raw link-layer frames via
 //!   read(2)/write(2)
+//! - [`CiTransport`] - en50221 7.1 transport layer: command-response TPDU
+//!   framing, per-slot queues, fragmentation and reassembly
+//! - [`CiSession`] - en50221 7.2 session layer: sessions between module
+//!   applications and host resources, activity reported as [`CaEvent`]
+//!
+//! Host-side resources (en50221 8): Resource Manager, Application
+//! Information, Host Control, Date-Time and MMI. The Conditional Access
+//! (CA PMT) resource is not implemented yet.
 
 mod apdu;
 mod asn1;
 mod resource;
+mod session;
 mod spdu;
 pub mod sys;
 mod tpdu;
@@ -42,7 +51,20 @@ use std::{
 use self::sys::*;
 pub use self::{
     apdu::ApduTag,
+    resource::{
+        ApplicationInfo,
+        MmiMenu,
+        ResourceId,
+    },
+    session::{
+        CaEvent,
+        CiSession,
+    },
     tpdu::TpduTag,
+    transport::{
+        CiTransport,
+        TransportRecv,
+    },
 };
 use crate::error::{
     Error,
@@ -132,6 +154,17 @@ impl CaDevice {
         }
 
         Ok(())
+    }
+
+    /// Creates a device over an arbitrary file: the tests run the stack
+    /// over a socketpair
+    #[cfg(test)]
+    pub(crate) fn from_file(file: File) -> CaDevice {
+        CaDevice {
+            adapter: 0,
+            device: 0,
+            file,
+        }
     }
 
     /// Reads one raw link frame from the device into `buf`
