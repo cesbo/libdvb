@@ -1,7 +1,14 @@
-#![allow(dead_code)]
+//! CA device and en50221 host stack
+//!
+//! en50221: the Common Interface specification for conditional access and
+//! other applications. The host side of the stack is layered bottom-up as:
+//!
+//! - [`CaDevice`] - the kernel CA device (/dev/dvb/adapterN/caN), raw link-layer frames via
+//!   read(2)/write(2)
 
 mod apdu;
 mod asn1;
+mod resource;
 mod spdu;
 pub mod sys;
 mod tpdu;
@@ -11,35 +18,43 @@ use std::{
         File,
         OpenOptions,
     },
+    io::{
+        ErrorKind,
+        Read,
+        Write,
+    },
     os::{
         fd::{
             AsFd,
             BorrowedFd,
         },
-        unix::io::{
-            AsRawFd,
-            RawFd,
+        unix::{
+            fs::OpenOptionsExt,
+            io::{
+                AsRawFd,
+                RawFd,
+            },
         },
     },
-    thread,
-    time::Duration,
 };
 
 use self::sys::*;
+pub use self::{
+    apdu::ApduTag,
+    tpdu::TpduTag,
+};
 use crate::error::{
     Error,
     Result,
 };
 
-const CA_DELAY: Duration = Duration::from_millis(100);
-
+/// CA device of the DVB adapter (/dev/dvb/adapterN/caN)
 #[derive(Debug)]
 pub struct CaDevice {
     adapter: u32,
     device: u32,
 
     file: File,
-    slot: CaSlotInfo,
 }
 
 impl AsRawFd for CaDevice {
@@ -55,133 +70,79 @@ impl AsFd for CaDevice {
 }
 
 impl CaDevice {
-    /// Sends reset command to CA device
-    pub fn reset(&mut self) -> Result<()> {
-        // CA_RESET
-        nix::ioctl_none!(
-            #[inline]
-            ca_reset,
-            b'o',
-            128
-        );
+    /// Attempts to open the CA device in non-blocking read-write mode.
+    /// Non-blocking mode is required for CA device.
+    pub fn open(adapter: u32, device: u32) -> Result<CaDevice> {
+        let path = format!("/dev/dvb/adapter{}/ca{}", adapter, device);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(::nix::libc::O_NONBLOCK)
+            .open(&path)?;
+
+        Ok(CaDevice {
+            adapter,
+            device,
+            file,
+        })
+    }
+
+    /// Returns the adapter number the device was opened with
+    pub fn adapter(&self) -> u32 {
+        self.adapter
+    }
+
+    /// Returns the device number the device was opened with
+    pub fn device(&self) -> u32 {
+        self.device
+    }
+
+    /// Gets CA interface capabilities (CA_GET_CAP ioctl)
+    pub fn caps(&self) -> Result<CaCaps> {
+        let mut caps = CaCaps::default();
+        unsafe { ca_get_cap(self.as_raw_fd(), &mut caps as *mut _) }?;
+
+        Ok(caps)
+    }
+
+    /// Gets slot information for the given slot (CA_GET_SLOT_INFO ioctl)
+    pub fn slot_info(&self, slot_id: u8) -> Result<CaSlotInfo> {
+        let mut slot_info = CaSlotInfo {
+            slot_num: u32::from(slot_id),
+            ..CaSlotInfo::default()
+        };
+        unsafe { ca_get_slot_info(self.as_raw_fd(), &mut slot_info as *mut _) }?;
+
+        Ok(slot_info)
+    }
+
+    /// Resets the CA interface (CA_RESET ioctl)
+    pub fn reset(&self) -> Result<()> {
         unsafe { ca_reset(self.as_raw_fd()) }?;
 
         Ok(())
     }
 
-    /// Gets CA capabilities
-    pub fn get_caps(&self, caps: &mut CaCaps) -> Result<()> {
-        // CA_GET_CAP
-        nix::ioctl_read!(
-            #[inline]
-            ca_get_cap,
-            b'o',
-            129,
-            CaCaps
-        );
-        unsafe { ca_get_cap(self.as_raw_fd(), caps as *mut _) }?;
-
-        Ok(())
-    }
-
-    /// Gets CA slot information
-    pub fn get_slot_info(&mut self) -> Result<()> {
-        // CA_GET_SLOT_INFO
-        nix::ioctl_read!(
-            #[inline]
-            ca_get_slot_info,
-            b'o',
-            130,
-            CaSlotInfo
-        );
-        unsafe { ca_get_slot_info(self.as_raw_fd(), &mut self.slot as *mut _) }?;
-
-        Ok(())
-    }
-
-    /// Attempts to open a CA device in blocking read-write mode.
-    pub fn open(adapter: u32, device: u32, slot: u32) -> Result<CaDevice> {
-        let path = format!("/dev/dvb/adapter{}/ca{}", adapter, device);
-        let file = OpenOptions::new().read(true).write(true).open(&path)?;
-
-        let mut ca = CaDevice {
-            adapter,
-            device,
-
-            file,
-            slot: CaSlotInfo::default(),
-        };
-
-        ca.reset()?;
-
-        thread::sleep(CA_DELAY);
-
-        let mut caps = CaCaps::default();
-
-        for _ in 0 .. 5 {
-            ca.get_caps(&mut caps)?;
-
-            if caps.slot_num != 0 {
-                break;
-            }
-
-            thread::sleep(CA_DELAY);
+    /// Writes one raw link frame to the device
+    pub fn send_msg(&self, msg: &[u8]) -> Result<()> {
+        let written = (&self.file).write(msg)?;
+        if written != msg.len() {
+            return Err(Error::InvalidData("ca link frame short write".to_owned()));
         }
 
-        if slot >= caps.slot_num {
-            return Err(Error::InvalidProperty("ca slot not found".to_owned()));
-        }
-
-        ca.slot.slot_num = slot;
-        ca.get_slot_info()?;
-
-        if ca.slot.slot_type != CA_CI_LINK {
-            return Err(Error::InvalidProperty(
-                "incompatible ca interface".to_owned(),
-            ));
-        }
-
-        // reset flags
-        ca.slot.flags = CA_CI_MODULE_NOT_FOUND;
-
-        Ok(ca)
-    }
-
-    fn poll_timer(&mut self) -> Result<()> {
-        let flags = self.slot.flags;
-
-        self.get_slot_info()?;
-
-        match self.slot.flags {
-            CA_CI_MODULE_PRESENT => {
-                if flags == CA_CI_MODULE_READY {
-                    // TODO: de-init
-                }
-                return Ok(());
-            }
-            CA_CI_MODULE_READY => {
-                if flags != CA_CI_MODULE_READY {
-                    tpdu::init(self, self.slot.slot_num as u8)?;
-                }
-            }
-            CA_CI_MODULE_NOT_FOUND => {
-                return Err(Error::InvalidData("ca module not found".to_owned()));
-            }
-            _ => {
-                return Err(Error::InvalidData(
-                    "ca module invalid slot flags".to_owned(),
-                ));
-            }
-        };
-
-        // TODO: check queue?
-
         Ok(())
     }
 
-    fn poll_event(&mut self) -> Result<()> {
-        // TODO: tpdu read
-
-        Ok(())
+    /// Reads one raw link frame from the device into `buf`
+    pub fn recv_msg(&self, buf: &mut [u8]) -> Result<Option<usize>> {
+        match (&self.file).read(buf) {
+            Ok(0) => Err(Error::Io(std::io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "ca device closed (zero-length read)",
+            ))),
+            Ok(len) => Ok(Some(len)),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => Ok(None),
+            Err(e) => Err(Error::Io(e)),
+        }
     }
 }
