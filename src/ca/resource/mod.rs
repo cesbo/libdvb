@@ -13,6 +13,7 @@ pub(super) mod rm;
 use std::{
     collections::VecDeque,
     fmt,
+    time::Instant,
 };
 
 pub use self::{
@@ -122,7 +123,7 @@ pub(super) trait Resource {
     fn on_close(&mut self, _slot_id: u8, _session_id: u16) {}
 
     /// Called from the session layer tick for time-based work
-    fn on_tick(&mut self, _transport: &mut CiTransport) -> Result<()> {
+    fn on_tick(&mut self, _transport: &mut CiTransport, _now: Instant) -> Result<()> {
         Ok(())
     }
 }
@@ -174,9 +175,9 @@ impl ResourceRegistry {
     }
 
     /// Runs time-based work of all resources
-    pub fn tick(&mut self, transport: &mut CiTransport) -> Result<()> {
+    pub fn tick(&mut self, transport: &mut CiTransport, now: Instant) -> Result<()> {
         for resource in self.resources() {
-            resource.on_tick(transport)?;
+            resource.on_tick(transport, now)?;
         }
 
         Ok(())

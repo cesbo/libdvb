@@ -18,11 +18,17 @@ use std::{
             RawFd,
         },
     },
+    time::Instant,
 };
 
 use super::{
     apdu,
     apdu::ApduTag,
+    controller::{
+        CaSlotFailure,
+        CaSlotStatus,
+        CamStatus,
+    },
     resource::{
         ApplicationInfo,
         MmiMenu,
@@ -46,9 +52,27 @@ use crate::error::{
 /// Highest number of concurrent sessions per slot
 const MAX_SLOT_SESSIONS: usize = 16;
 
-/// Session layer activity delivered by [`CiSession::next_event`]
+/// DVB-CI activity delivered by [`CiSession::next_event`] or
+/// [`super::CiController::poll_event`]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaEvent {
+    /// The high-level controller changed the physical/transport state
+    /// of a slot
+    SlotStatusChanged {
+        slot_id: u8,
+        old: CaSlotStatus,
+        new: CaSlotStatus,
+    },
+    /// The high-level controller advanced or cleared the confirmed CAM
+    /// application state
+    CamStatusChanged {
+        slot_id: u8,
+        old: CamStatus,
+        new: CamStatus,
+    },
+    /// The high-level controller abandoned the current transport
+    /// connection and scheduled recovery
+    SlotFailed { slot_id: u8, reason: CaSlotFailure },
     /// TT_CTC_REPLY: the transport connection is established and the
     /// module is about to open sessions
     TransportReady { slot_id: u8 },
@@ -209,9 +233,25 @@ impl CiSession {
     /// state. Returns `Ok(false)` when the link has no data. Call
     /// [`CiSession::next_event`] to drain the produced events.
     pub fn recv(&mut self) -> Result<bool> {
+        Ok(self.recv_filtered(|_| true)?.is_some())
+    }
+
+    /// Controller-aware receive path. The controller rejects SPDUs from
+    /// slots without an active transport connection while still consuming
+    /// and acknowledging the link frame.
+    pub(crate) fn recv_controller(&mut self, active_slots: &[bool]) -> Result<Option<u8>> {
+        self.recv_filtered(|slot_id| {
+            active_slots
+                .get(usize::from(slot_id))
+                .copied()
+                .unwrap_or(false)
+        })
+    }
+
+    fn recv_filtered(&mut self, accept_spdu: impl FnOnce(u8) -> bool) -> Result<Option<u8>> {
         let recv = match self.transport.recv_apdu()? {
             Some(recv) => recv,
-            None => return Ok(false),
+            None => return Ok(None),
         };
         let slot_id = recv.slot_id();
 
@@ -219,7 +259,18 @@ impl CiSession {
             TransportRecv::TcReply { slot_id } => {
                 self.events.push_back(CaEvent::TransportReady { slot_id });
             }
-            TransportRecv::Spdu { slot_id, spdu } => self.dispatch_spdu(slot_id, &spdu)?,
+            TransportRecv::Spdu { slot_id, spdu } if accept_spdu(slot_id) => {
+                self.dispatch_spdu(slot_id, &spdu)?
+            }
+            TransportRecv::Spdu { slot_id, .. } => {
+                self.events.push_back(CaEvent::Malformed {
+                    slot_id,
+                    context: format!(
+                        "ca slot {}: session data before the transport connection is active",
+                        slot_id
+                    ),
+                });
+            }
             TransportRecv::Status { .. } => {}
             TransportRecv::Malformed { slot_id, context } => {
                 self.events
@@ -230,13 +281,20 @@ impl CiSession {
         // the read event allows the next queued frame out
         self.transport.flush(slot_id)?;
 
-        Ok(true)
+        Ok(Some(slot_id))
     }
 
     /// Runs the time-based work of the resources: periodic date_time
     /// updates. Call once a second or so.
     pub fn tick(&mut self) -> Result<()> {
-        self.resources.tick(&mut self.transport)
+        self.tick_at(Instant::now())
+    }
+
+    /// Runs resource timers against an explicit monotonic instant. This is
+    /// used by [`super::CiController::tick`] and is useful to event loops
+    /// which already own their notion of time.
+    pub fn tick_at(&mut self, now: Instant) -> Result<()> {
+        self.resources.tick(&mut self.transport, now)
     }
 
     /// Closes all sessions of the slot and clears its transport state;
@@ -630,6 +688,7 @@ mod tests {
             fd::OwnedFd,
             unix::net::UnixDatagram,
         },
+        time::Duration,
     };
 
     use super::{
@@ -1348,13 +1407,17 @@ mod tests {
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(spdus.len(), 1);
 
-        // nothing to send before the interval elapses
-        session.tick().unwrap();
+        // The first explicit tick anchors the interval to the caller's
+        // monotonic clock; no sleep or backdating is needed.
+        let now = Instant::now();
+        session.tick_at(now).unwrap();
         assert!(pump(&mut session, &mut cam).is_empty());
 
-        // the interval elapsed: tick resends the time
-        session.resources.date_time.backdate(1, 31);
-        session.tick().unwrap();
+        session.tick_at(now + Duration::from_secs(29)).unwrap();
+        assert!(pump(&mut session, &mut cam).is_empty());
+
+        // the interval elapsed: tick_at resends the time
+        session.tick_at(now + Duration::from_secs(30)).unwrap();
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(spdus.len(), 1);
         assert_eq!(

@@ -16,8 +16,10 @@ use std::{
 };
 
 use super::{
-    super::apdu::ApduTag,
-    super::transport::CiTransport,
+    super::{
+        apdu::ApduTag,
+        transport::CiTransport,
+    },
     Resource,
     ResourceContext,
     ResourceId,
@@ -64,7 +66,7 @@ struct DateTimeSession {
     /// periodic updates
     interval: u8,
     /// when the date_time object was sent the last time
-    sent: Instant,
+    sent: Option<Instant>,
 }
 
 /// Date-Time resource
@@ -78,17 +80,6 @@ impl DateTimeResource {
             sessions: HashMap::new(),
         }
     }
-
-    /// Shifts the last send time of the session into the past so the
-    /// tests exercise the periodic resend without sleeping
-    #[cfg(test)]
-    pub fn backdate(&mut self, session_id: u16, secs: u64) {
-        if let Some(session) = self.sessions.get_mut(&session_id)
-            && let Some(sent) = session.sent.checked_sub(Duration::from_secs(secs))
-        {
-            session.sent = sent;
-        }
-    }
 }
 
 impl Resource for DateTimeResource {
@@ -97,11 +88,14 @@ impl Resource for DateTimeResource {
     }
 
     fn on_open(&mut self, ctx: &mut ResourceContext<'_>) -> Result<()> {
-        self.sessions.insert(ctx.session_id, DateTimeSession {
-            slot_id: ctx.slot_id,
-            interval: 0,
-            sent: Instant::now(),
-        });
+        self.sessions.insert(
+            ctx.session_id,
+            DateTimeSession {
+                slot_id: ctx.slot_id,
+                interval: 0,
+                sent: None,
+            },
+        );
 
         // announce the time right away: some modules expect the object
         // shortly after the session opens, before any enquiry
@@ -114,7 +108,7 @@ impl Resource for DateTimeResource {
                 let interval = body.first().copied().unwrap_or(0);
                 if let Some(session) = self.sessions.get_mut(&ctx.session_id) {
                     session.interval = interval;
-                    session.sent = Instant::now();
+                    session.sent = None;
                 }
 
                 ctx.send_apdu(ApduTag::DATE_TIME, &now_body())
@@ -130,17 +124,25 @@ impl Resource for DateTimeResource {
         self.sessions.remove(&session_id);
     }
 
-    fn on_tick(&mut self, transport: &mut CiTransport) -> Result<()> {
+    fn on_tick(&mut self, transport: &mut CiTransport, now: Instant) -> Result<()> {
         for (&session_id, session) in self.sessions.iter_mut() {
             if session.interval == 0 {
                 continue;
             }
-            if session.sent.elapsed() < Duration::from_secs(u64::from(session.interval)) {
+            let Some(sent) = session.sent else {
+                // on_open/on_apdu do not receive the caller's monotonic
+                // clock; anchor the interval on the first explicit tick.
+                session.sent = Some(now);
+                continue;
+            };
+            if now.saturating_duration_since(sent)
+                < Duration::from_secs(u64::from(session.interval))
+            {
                 continue;
             }
 
             transport.send_apdu(session.slot_id, session_id, ApduTag::DATE_TIME, &now_body())?;
-            session.sent = Instant::now();
+            session.sent = Some(now);
         }
 
         Ok(())
@@ -174,7 +176,9 @@ mod tests {
         );
         // 2026-07-04 (20638 days since the epoch): MJD 61225 (0xEF29)
         assert_eq!(
-            date_time_body(Duration::from_secs(20638 * 86400 + 12 * 3600 + 34 * 60 + 56)),
+            date_time_body(Duration::from_secs(
+                20638 * 86400 + 12 * 3600 + 34 * 60 + 56
+            )),
             [0xEF, 0x29, 0x12, 0x34, 0x56]
         );
     }

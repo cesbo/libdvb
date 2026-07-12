@@ -12,10 +12,11 @@ Supports three types of delivery systems:
 - EN 50494 - Unicable I
 - EN 50607 - Unicable II
 
-DVB-CI (EN 50221) support currently includes the link, transport and
-session layers together with Resource Manager, Application Information,
-Host Control, Date-Time and high-level MMI resources. Conditional Access
-Support and CA PMT are not implemented yet.
+DVB-CI (EN 50221) support currently includes a runtime-neutral
+`CiController`, the link, transport and session layers, and Resource
+Manager, Application Information, Host Control, Date-Time and high-level
+MMI resources. Conditional Access Support and CA PMT are not implemented
+yet.
 
 ## FeDevice
 
@@ -149,6 +150,37 @@ let dev = NetDevice::open(0, 0)?;
 let interface = dev.add_if(0, libdvb::net::sys::DVB_NET_FEEDTYPE_MPE)?;
 println!("Interface: {}", interface);
 println!("MAC: {}", interface.mac());
+```
+
+## CI
+
+`CiController` manages multi-slot CAM insertion/removal, reset,
+`CREATE_TC`, transport polling, `RCV` and timeout recovery. It does not
+create a thread or own an event loop: integrate its file descriptor into
+the application runtime, drain `poll_event()` when readable and call
+`tick()` from a monotonic timer:
+
+```rust,no_run
+use std::time::Instant;
+
+use libdvb::{CaEvent, CiController};
+
+let mut ci = CiController::open(0, 0)?;
+
+// Call periodically (for example, every 100 ms).
+ci.tick(Instant::now())?;
+
+// Drain after each tick and from the CA descriptor readable callback.
+while let Some(event) = ci.poll_event()? {
+    match event {
+        CaEvent::SlotStatusChanged { slot_id, new, .. } => {
+            println!("CI slot {slot_id}: {new:?}");
+        }
+        event => println!("CI: {event:?}"),
+    }
+}
+
+# Ok::<(), libdvb::error::Error>(())
 ```
 
 ## File Descriptors

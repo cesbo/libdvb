@@ -9,6 +9,8 @@
 //!   framing, per-slot queues, fragmentation and reassembly
 //! - [`CiSession`] - en50221 7.2 session layer: sessions between module
 //!   applications and host resources, activity reported as [`CaEvent`]
+//! - [`CiController`] - non-blocking slot lifecycle, reset, transport
+//!   creation, polling, RCV and timeout recovery
 //!
 //! Host-side resources (en50221 8): Resource Manager, Application
 //! Information, Host Control, Date-Time and MMI. The Conditional Access
@@ -16,6 +18,7 @@
 
 mod apdu;
 mod asn1;
+mod controller;
 mod resource;
 mod session;
 mod spdu;
@@ -51,6 +54,13 @@ use std::{
 use self::sys::*;
 pub use self::{
     apdu::ApduTag,
+    controller::{
+        CaSlotFailure,
+        CaSlotStatus,
+        CamStatus,
+        CiController,
+        CiControllerConfig,
+    },
     resource::{
         ApplicationInfo,
         MmiMenu,

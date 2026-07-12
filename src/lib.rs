@@ -10,6 +10,11 @@ mod fd;
 pub use ca::{
     CaDevice,
     CaEvent,
+    CaSlotFailure,
+    CaSlotStatus,
+    CamStatus,
+    CiController,
+    CiControllerConfig,
     CiSession,
     CiTransport,
 };

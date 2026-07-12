@@ -5,38 +5,35 @@
 //! Pointer-sized fields are computed from the target pointer width, so the
 //! checks hold on both 64-bit and 32-bit targets.
 
-use {
-    std::{
-        ffi::c_void,
-        mem::offset_of,
-    },
-
-    libdvb::{
-        ca::sys::{
-            CaCaps,
-            CaDescr,
-            CaDescrInfo,
-            CaMsg,
-            CaPid,
-            CaSlotInfo,
-        },
-        dmx::sys::DmxPesFilterParams,
-        fe::sys::{
-            DiseqcMasterCmd,
-            DiseqcSlaveReply,
-            DtvFrontendStats,
-            DtvPropertyBuffer,
-            DtvPropertyData,
-            DtvPropertyRaw,
-            DtvStats,
-            FeEvent,
-            FeInfo,
-            FeParameters,
-        },
-        net::sys::DvbNetIf,
-    },
+use std::{
+    ffi::c_void,
+    mem::offset_of,
 };
 
+use libdvb::{
+    ca::sys::{
+        CaCaps,
+        CaDescr,
+        CaDescrInfo,
+        CaMsg,
+        CaPid,
+        CaSlotInfo,
+    },
+    dmx::sys::DmxPesFilterParams,
+    fe::sys::{
+        DiseqcMasterCmd,
+        DiseqcSlaveReply,
+        DtvFrontendStats,
+        DtvPropertyBuffer,
+        DtvPropertyData,
+        DtvPropertyRaw,
+        DtvStats,
+        FeEvent,
+        FeInfo,
+        FeParameters,
+    },
+    net::sys::DvbNetIf,
+};
 
 const PTR_SIZE: usize = size_of::<*mut c_void>();
 
@@ -49,7 +46,6 @@ const DTV_PROPERTY_DATA_SIZE: usize = DTV_PROPERTY_BUFFER_SIZE;
 /// struct dtv_property is packed: __u32 cmd + __u32 reserved[3] + union + int result
 const DTV_PROPERTY_SIZE: usize = 4 + 12 + DTV_PROPERTY_DATA_SIZE + 4;
 
-
 #[test]
 fn fe_info() {
     // struct dvb_frontend_info
@@ -59,7 +55,6 @@ fn fe_info() {
     assert_eq!(offset_of!(FeInfo, symbol_rate_min), 148);
     assert_eq!(offset_of!(FeInfo, caps), 164);
 }
-
 
 #[test]
 fn fe_diseqc() {
@@ -72,7 +67,6 @@ fn fe_diseqc() {
     assert_eq!(offset_of!(DiseqcSlaveReply, len), 4);
     assert_eq!(offset_of!(DiseqcSlaveReply, timeout), 8);
 }
-
 
 #[test]
 fn fe_stats() {
@@ -87,7 +81,6 @@ fn fe_stats() {
     assert_eq!(offset_of!(DtvFrontendStats, stat), 1);
 }
 
-
 #[test]
 fn fe_property() {
     assert_eq!(size_of::<DtvPropertyBuffer>(), DTV_PROPERTY_BUFFER_SIZE);
@@ -98,9 +91,11 @@ fn fe_property() {
     assert_eq!(align_of::<DtvPropertyRaw>(), 1);
     assert_eq!(offset_of!(DtvPropertyRaw, cmd), 0);
     assert_eq!(offset_of!(DtvPropertyRaw, u), 16);
-    assert_eq!(offset_of!(DtvPropertyRaw, result), 16 + DTV_PROPERTY_DATA_SIZE);
+    assert_eq!(
+        offset_of!(DtvPropertyRaw, result),
+        16 + DTV_PROPERTY_DATA_SIZE
+    );
 }
-
 
 #[test]
 fn fe_event() {
@@ -112,7 +107,6 @@ fn fe_event() {
     assert_eq!(offset_of!(FeEvent, parameters), 4);
 }
 
-
 #[test]
 fn dmx() {
     // struct dmx_pes_filter_params
@@ -121,14 +115,12 @@ fn dmx() {
     assert_eq!(offset_of!(DmxPesFilterParams, flags), 16);
 }
 
-
 #[test]
 fn net() {
     // struct dvb_net_if
     assert_eq!(size_of::<DvbNetIf>(), 6);
     assert_eq!(offset_of!(DvbNetIf, feedtype), 4);
 }
-
 
 #[test]
 fn auto_traits() {
@@ -138,8 +130,8 @@ fn auto_traits() {
     assert_send_sync::<libdvb::FeStatus>();
     assert_send_sync::<libdvb::FeDevice>();
     assert_send_sync::<libdvb::DvrDevice>();
+    assert_send_sync::<libdvb::CiController>();
 }
-
 
 #[test]
 fn ca() {
