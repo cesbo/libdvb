@@ -27,6 +27,8 @@ impl ApduTag {
     pub const APPLICATION_INFO_ENQ: Self = Self(0x9F8020);
     pub const APPLICATION_INFO: Self = Self(0x9F8021);
     pub const ENTER_MENU: Self = Self(0x9F8022);
+    pub const CA_INFO_ENQ: Self = Self(0x9F8030);
+    pub const CA_INFO: Self = Self(0x9F8031);
     pub const TUNE: Self = Self(0x9F8400);
     pub const REPLACE: Self = Self(0x9F8401);
     pub const CLEAR_REPLACE: Self = Self(0x9F8402);
@@ -66,6 +68,8 @@ impl fmt::Debug for ApduTag {
             Self::APPLICATION_INFO_ENQ => "APPLICATION_INFO_ENQ",
             Self::APPLICATION_INFO => "APPLICATION_INFO",
             Self::ENTER_MENU => "ENTER_MENU",
+            Self::CA_INFO_ENQ => "CA_INFO_ENQ",
+            Self::CA_INFO => "CA_INFO",
             Self::TUNE => "TUNE",
             Self::REPLACE => "REPLACE",
             Self::CLEAR_REPLACE => "CLEAR_REPLACE",
@@ -278,6 +282,9 @@ mod tests {
             format!("{:?}", ApduTag::PROFILE_ENQ),
             "ApduTag(PROFILE_ENQ)"
         );
+        assert_eq!(ApduTag::CA_INFO_ENQ.raw(), 0x9F8030);
+        assert_eq!(ApduTag::CA_INFO.raw(), 0x9F8031);
+        assert_eq!(format!("{:?}", ApduTag::CA_INFO), "ApduTag(CA_INFO)");
         assert_eq!(format!("{:?}", ApduTag::new(0x9F8888)), "ApduTag(0x9F8888)");
     }
 }

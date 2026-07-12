@@ -67,10 +67,9 @@ pub enum CaSlotStatus {
 
 /// Confirmed application-level progress of a CAM
 ///
-/// The current resource set can advance this status through
-/// [`CamStatus::ApplicationInfo`]. Conditional Access Support will use
-/// the remaining states when it is implemented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// The status is derived from confirmed Application Information and
+/// Conditional Access Support protocol objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CamStatus {
     /// No confirmed CAM application data
     None,
@@ -78,7 +77,10 @@ pub enum CamStatus {
     ApplicationInfo,
     /// A valid CA_INFO object was received
     CaInfo,
-    /// All resources required for CA PMT operation are ready
+    /// Valid APPLICATION_INFO and CA_INFO objects were received
+    ///
+    /// An empty CAID list still completes the protocol handshake; it
+    /// naturally cannot match any CA descriptor when CA PMT is added.
     Ready,
 }
 
@@ -298,6 +300,23 @@ impl CiController {
     /// Last application information received from a CAM
     pub fn app_info(&self, slot_id: u8) -> Option<&ApplicationInfo> {
         self.session.app_info(slot_id)
+    }
+
+    /// Sorted, deduplicated union of CAIDs reported by the live
+    /// Conditional Access Support sessions in a slot
+    pub fn caids(&self, slot_id: u8) -> Result<Vec<u16>> {
+        self.status(slot_id)?;
+        Ok(self.session.caids(slot_id))
+    }
+
+    /// CAIDs reported by one live Conditional Access Support session
+    ///
+    /// `None` means the session is unknown, is not active, belongs to
+    /// another slot, or has not replied with CA_INFO yet. A confirmed
+    /// empty CA_INFO is returned as `Some(&[])`.
+    pub fn session_caids(&self, slot_id: u8, session_id: u16) -> Result<Option<&[u16]>> {
+        self.status(slot_id)?;
+        Ok(self.session.session_caids(slot_id, session_id))
     }
 
     /// Asks the CAM to enter its menu
@@ -762,7 +781,7 @@ impl CiController {
                         .get(usize::from(slot_id))
                         .is_some_and(|slot| slot.status == CaSlotStatus::Active)
                     {
-                        self.set_cam_status(slot_id, CamStatus::ApplicationInfo);
+                        self.recompute_cam_status(slot_id);
                         self.events
                             .push_back(CaEvent::ApplicationInfo { slot_id, info });
                     } else {
@@ -775,15 +794,41 @@ impl CiController {
                         });
                     }
                 }
+                CaEvent::CaInfo {
+                    slot_id,
+                    session_id,
+                    caids,
+                } => {
+                    if self
+                        .slots
+                        .get(usize::from(slot_id))
+                        .is_some_and(|slot| slot.status == CaSlotStatus::Active)
+                    {
+                        self.recompute_cam_status(slot_id);
+                        self.events.push_back(CaEvent::CaInfo {
+                            slot_id,
+                            session_id,
+                            caids,
+                        });
+                    } else {
+                        self.events.push_back(CaEvent::Malformed {
+                            slot_id,
+                            context: format!(
+                                "ca slot {}: conditional access information on an inactive slot",
+                                slot_id
+                            ),
+                        });
+                    }
+                }
                 CaEvent::SessionClosed {
                     slot_id,
                     session_id,
                     resource_id,
                 } => {
                     if resource_id.base() == ResourceId::APPLICATION_INFORMATION.base()
-                        && self.session.app_info(slot_id).is_none()
+                        || resource_id.base() == ResourceId::CONDITIONAL_ACCESS_SUPPORT.base()
                     {
-                        self.set_cam_status(slot_id, CamStatus::None);
+                        self.recompute_cam_status(slot_id);
                     }
                     self.events.push_back(CaEvent::SessionClosed {
                         slot_id,
@@ -890,6 +935,22 @@ impl CiController {
             self.events
                 .push_back(CaEvent::CamStatusChanged { slot_id, old, new });
         }
+    }
+
+    fn recompute_cam_status(&mut self, slot_id: u8) {
+        let active = self
+            .slots
+            .get(usize::from(slot_id))
+            .is_some_and(|slot| slot.status == CaSlotStatus::Active);
+        let application_info = self.session.app_info(slot_id).is_some();
+        let ca_info = self.session.has_ca_info(slot_id);
+        let status = match (active, application_info, ca_info) {
+            (false, _, _) | (true, false, false) => CamStatus::None,
+            (true, true, false) => CamStatus::ApplicationInfo,
+            (true, false, true) => CamStatus::CaInfo,
+            (true, true, true) => CamStatus::Ready,
+        };
+        self.set_cam_status(slot_id, status);
     }
 }
 
@@ -1110,6 +1171,59 @@ mod tests {
             } if *event_slot == slot_id
         )));
         assert_eq!(controller.status(slot_id).unwrap(), CaSlotStatus::Active);
+    }
+
+    fn open_resource(
+        controller: &mut CiController,
+        cam: &mut TestCam,
+        slot_id: u8,
+        resource_id: ResourceId,
+        enquiry_tag: ApduTag,
+    ) -> u16 {
+        let raw = resource_id.raw();
+        cam.send_spdu(
+            slot_id,
+            &[
+                0x91,
+                0x04,
+                (raw >> 24) as u8,
+                (raw >> 16) as u8,
+                (raw >> 8) as u8,
+                raw as u8,
+            ],
+        );
+        let events = drain(controller);
+        let session_id = events
+            .iter()
+            .find_map(|event| match event {
+                CaEvent::SessionOpened {
+                    slot_id: event_slot,
+                    session_id,
+                    resource_id: event_resource,
+                } if *event_slot == slot_id && event_resource.base() == resource_id.base() => {
+                    Some(*session_id)
+                }
+                _ => None,
+            })
+            .expect("resource session opened");
+
+        let response = spdu::build_open_session_response(spdu::SS_OK, resource_id, session_id);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(slot_id, TpduTag::DATA_LAST, &response).unwrap()
+        );
+        assert!(cam.recv().is_none());
+
+        cam.send_status(slot_id, false);
+        assert!(drain(controller).is_empty());
+        let mut enquiry = spdu::build_session_number(session_id);
+        apdu::build(&mut enquiry, enquiry_tag, &[]);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(slot_id, TpduTag::DATA_LAST, &enquiry).unwrap()
+        );
+
+        session_id
     }
 
     #[test]
@@ -1503,6 +1617,408 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn test_ca_info_then_application_info_reaches_ready_and_closes_cleanly() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &[]);
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::None,
+                new: CamStatus::CaInfo,
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CaInfo {
+                slot_id: 0,
+                session_id,
+                caids,
+            } if *session_id == ca_session && caids.is_empty()
+        )));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::CaInfo);
+        assert_eq!(
+            controller.session_caids(0, ca_session).unwrap(),
+            Some([].as_slice())
+        );
+        assert!(controller.caids(0).unwrap().is_empty());
+
+        let app_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0x12, 0x34, 0x56, 0x78, 0x03, b'C', b'A', b'M'],
+        );
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::CaInfo,
+                new: CamStatus::Ready,
+            }
+        )));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+
+        // A repeated ApplicationInfo must not lower Ready.
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0x12, 0x34, 0x56, 0x78, 0x04, b'C', b'A', b'M', b'2'],
+        );
+        let events = drain(&mut controller);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, CaEvent::CamStatusChanged { .. }))
+        );
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+
+        // Closing Application Information first keeps CA_INFO and
+        // downgrades Ready to CaInfo.
+        cam.send_spdu(0, &[0x95, 0x02, 0x00, app_session as u8]);
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::Ready,
+                new: CamStatus::CaInfo,
+            }
+        )));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::CaInfo);
+        assert!(controller.app_info(0).is_none());
+
+        assert!(cam.recv().is_some());
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        // Reopening Application Information restores Ready.
+        let app_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0x12, 0x34, 0x56, 0x78, 0x03, b'C', b'A', b'M'],
+        );
+        let _ = drain(&mut controller);
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+
+        // Closing only CA Support keeps Application Information and
+        // downgrades Ready to ApplicationInfo.
+        cam.send_spdu(0, &[0x95, 0x02, 0x00, ca_session as u8]);
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::Ready,
+                new: CamStatus::ApplicationInfo,
+            }
+        )));
+        assert_eq!(
+            controller.cam_status(0).unwrap(),
+            CamStatus::ApplicationInfo
+        );
+        assert_eq!(controller.session_caids(0, ca_session).unwrap(), None);
+        assert!(controller.app_info(0).is_some());
+    }
+
+    #[test]
+    fn test_application_info_then_ca_info_reaches_ready_and_removal_clears_caids() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+
+        let app_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0x12, 0x34, 0x56, 0x78, 0x03, b'C', b'A', b'M'],
+        );
+        let _ = drain(&mut controller);
+        assert_eq!(
+            controller.cam_status(0).unwrap(),
+            CamStatus::ApplicationInfo
+        );
+
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        assert_eq!(
+            controller.cam_status(0).unwrap(),
+            CamStatus::ApplicationInfo
+        );
+        assert_eq!(controller.session_caids(0, ca_session).unwrap(), None);
+        cam.send_apdu(
+            0,
+            ca_session,
+            ApduTag::CA_INFO,
+            &[0x05, 0x00, 0x01, 0x00, 0x05, 0x00],
+        );
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::ApplicationInfo,
+                new: CamStatus::Ready,
+            }
+        )));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0100, 0x0500]);
+        assert_eq!(
+            controller.session_caids(0, ca_session).unwrap(),
+            Some([0x0500, 0x0100, 0x0500].as_slice())
+        );
+
+        // An invalid update is non-destructive and cannot lower Ready.
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &[0x01, 0x00, 0xFF]);
+        let events = drain(&mut controller);
+        assert!(matches!(
+            events.as_slice(),
+            [CaEvent::Malformed { slot_id: 0, .. }]
+        ));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0100, 0x0500]);
+
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO_ENQ, &[]);
+        let events = drain(&mut controller);
+        assert!(matches!(
+            events.as_slice(),
+            [CaEvent::Malformed { slot_id: 0, .. }]
+        ));
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0100, 0x0500]);
+
+        // A later valid update atomically replaces the session list and
+        // reports CaInfo without another status transition.
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &[0x06, 0x04]);
+        let events = drain(&mut controller);
+        assert_eq!(
+            events,
+            [CaEvent::CaInfo {
+                slot_id: 0,
+                session_id: ca_session,
+                caids: vec![0x0604],
+            }]
+        );
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0604]);
+
+        set_flags(&state, 0, 0);
+        controller.tick(now).unwrap();
+        assert_eq!(controller.status(0).unwrap(), CaSlotStatus::Absent);
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::None);
+        assert!(controller.caids(0).unwrap().is_empty());
+        assert_eq!(controller.session_caids(0, ca_session).unwrap(), None);
+    }
+
+    #[test]
+    fn test_ready_survives_close_of_one_application_and_ca_session() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+
+        let app_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0, 1, 0, 1, 0],
+        );
+        let _ = drain(&mut controller);
+
+        let second_app = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            second_app,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0, 2, 0, 2, 0],
+        );
+        let _ = drain(&mut controller);
+
+        let first = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, first, ApduTag::CA_INFO, &[0x01, 0x00]);
+        let _ = drain(&mut controller);
+
+        let second = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, second, ApduTag::CA_INFO, &[0x05, 0x00]);
+        let _ = drain(&mut controller);
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0100, 0x0500]);
+
+        cam.send_spdu(0, &[0x95, 0x02, 0x00, app_session as u8]);
+        let events = drain(&mut controller);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, CaEvent::CamStatusChanged { .. }))
+        );
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert!(controller.app_info(0).is_some());
+
+        assert!(cam.recv().is_some());
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        cam.send_spdu(0, &[0x95, 0x02, 0x00, first as u8]);
+        let events = drain(&mut controller);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, CaEvent::CamStatusChanged { .. }))
+        );
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(0).unwrap(), [0x0500]);
+
+        // Acknowledge the close response before closing the remaining
+        // resource session.
+        assert!(cam.recv().is_some());
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        cam.send_spdu(0, &[0x95, 0x02, 0x00, second as u8]);
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CamStatusChanged {
+                slot_id: 0,
+                old: CamStatus::Ready,
+                new: CamStatus::ApplicationInfo,
+            }
+        )));
+        assert_eq!(
+            controller.cam_status(0).unwrap(),
+            CamStatus::ApplicationInfo
+        );
+        assert!(controller.caids(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_removing_one_ready_slot_does_not_change_another() {
+        let (mut controller, mut cam, state) = pair(2);
+        let now = Instant::now();
+        set_flags(&state, 0, CA_CI_MODULE_PRESENT | CA_CI_MODULE_READY);
+        set_flags(&state, 1, CA_CI_MODULE_PRESENT | CA_CI_MODULE_READY);
+        controller.tick(now).unwrap();
+
+        let mut creates = vec![cam.recv().unwrap(), cam.recv().unwrap()];
+        creates.sort();
+        let mut expected = vec![
+            tpdu::build(0, TpduTag::CREATE_TC, &[]).unwrap(),
+            tpdu::build(1, TpduTag::CREATE_TC, &[]).unwrap(),
+        ];
+        expected.sort();
+        assert_eq!(creates, expected);
+        let _ = drain(&mut controller);
+
+        cam.send_ctc_reply(0, false);
+        cam.send_ctc_reply(1, false);
+        let _ = drain(&mut controller);
+        assert_eq!(controller.status(0).unwrap(), CaSlotStatus::Active);
+        assert_eq!(controller.status(1).unwrap(), CaSlotStatus::Active);
+
+        for (slot_id, caid) in [(0, 0x0100_u16), (1, 0x0500_u16)] {
+            let app_session = open_resource(
+                &mut controller,
+                &mut cam,
+                slot_id,
+                ResourceId::APPLICATION_INFORMATION,
+                ApduTag::APPLICATION_INFO_ENQ,
+            );
+            cam.send_apdu(
+                slot_id,
+                app_session,
+                ApduTag::APPLICATION_INFO,
+                &[0x01, 0, 1, 0, 1, 0],
+            );
+            let _ = drain(&mut controller);
+
+            let ca_session = open_resource(
+                &mut controller,
+                &mut cam,
+                slot_id,
+                ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+                ApduTag::CA_INFO_ENQ,
+            );
+            cam.send_apdu(slot_id, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+            let _ = drain(&mut controller);
+            assert_eq!(controller.cam_status(slot_id).unwrap(), CamStatus::Ready);
+            assert_eq!(controller.caids(slot_id).unwrap(), [caid]);
+        }
+
+        set_flags(&state, 0, 0);
+        controller.tick(now).unwrap();
+        assert_eq!(controller.status(0).unwrap(), CaSlotStatus::Absent);
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::None);
+        assert!(controller.caids(0).unwrap().is_empty());
+        assert_eq!(controller.status(1).unwrap(), CaSlotStatus::Active);
+        assert_eq!(controller.cam_status(1).unwrap(), CamStatus::Ready);
+        assert_eq!(controller.caids(1).unwrap(), [0x0500]);
     }
 
     #[test]

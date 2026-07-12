@@ -7,11 +7,13 @@
 use std::collections::HashMap;
 
 use super::{
-    super::apdu::ApduTag,
+    super::{
+        apdu::ApduTag,
+        session::CaEvent,
+    },
     Resource,
     ResourceContext,
     ResourceId,
-    super::session::CaEvent,
 };
 use crate::error::{
     Error,
@@ -57,20 +59,44 @@ fn parse_application_info(slot_id: u8, body: &[u8]) -> Result<ApplicationInfo> {
 
 /// Application Information resource
 pub struct ApplicationInfoResource {
-    /// last received application info per slot
-    info: HashMap<u8, ApplicationInfo>,
+    /// application info belongs to a resource session; keeping sessions
+    /// separate prevents one close from erasing another live application
+    sessions: HashMap<u16, ApplicationInfoSession>,
+    revision: u64,
+}
+
+struct ApplicationInfoSession {
+    slot_id: u8,
+    info: Option<ApplicationInfo>,
+    revision: u64,
 }
 
 impl ApplicationInfoResource {
     pub fn new() -> Self {
         ApplicationInfoResource {
-            info: HashMap::new(),
+            sessions: HashMap::new(),
+            revision: 0,
         }
     }
 
-    /// Last application info received from the module in the slot
+    /// Last application info received from a live session in the slot
     pub fn info(&self, slot_id: u8) -> Option<&ApplicationInfo> {
-        self.info.get(&slot_id)
+        self.info_session(slot_id).map(|(_, info)| info)
+    }
+
+    /// Session which supplied the last application info in the slot
+    pub fn info_session(&self, slot_id: u8) -> Option<(u16, &ApplicationInfo)> {
+        self.sessions
+            .iter()
+            .filter(|(_, session)| session.slot_id == slot_id)
+            .filter_map(|(session_id, session)| {
+                session
+                    .info
+                    .as_ref()
+                    .map(|info| (*session_id, session.revision, info))
+            })
+            .max_by_key(|(session_id, revision, _)| (*revision, *session_id))
+            .map(|(session_id, _, info)| (session_id, info))
     }
 }
 
@@ -80,6 +106,14 @@ impl Resource for ApplicationInfoResource {
     }
 
     fn on_open(&mut self, ctx: &mut ResourceContext<'_>) -> Result<()> {
+        self.sessions.insert(
+            ctx.session_id,
+            ApplicationInfoSession {
+                slot_id: ctx.slot_id,
+                info: None,
+                revision: 0,
+            },
+        );
         ctx.send_apdu(ApduTag::APPLICATION_INFO_ENQ, &[])
     }
 
@@ -87,7 +121,15 @@ impl Resource for ApplicationInfoResource {
         match tag {
             ApduTag::APPLICATION_INFO => {
                 let info = parse_application_info(ctx.slot_id, body)?;
-                self.info.insert(ctx.slot_id, info.clone());
+                let session = self.sessions.get_mut(&ctx.session_id).ok_or_else(|| {
+                    Error::InvalidData(format!(
+                        "ca slot {}: application info on unknown resource session {}",
+                        ctx.slot_id, ctx.session_id
+                    ))
+                })?;
+                self.revision = self.revision.saturating_add(1);
+                session.info = Some(info.clone());
+                session.revision = self.revision;
                 ctx.event(CaEvent::ApplicationInfo {
                     slot_id: ctx.slot_id,
                     info,
@@ -102,8 +144,8 @@ impl Resource for ApplicationInfoResource {
         }
     }
 
-    fn on_close(&mut self, slot_id: u8, _session_id: u16) {
-        self.info.remove(&slot_id);
+    fn on_close(&mut self, _slot_id: u8, session_id: u16) {
+        self.sessions.remove(&session_id);
     }
 }
 

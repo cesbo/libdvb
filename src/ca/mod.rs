@@ -13,8 +13,8 @@
 //!   creation, polling, RCV and timeout recovery
 //!
 //! Host-side resources (en50221 8): Resource Manager, Application
-//! Information, Host Control, Date-Time and MMI. The Conditional Access
-//! (CA PMT) resource is not implemented yet.
+//! Information, Conditional Access Support (`CA_INFO`), Host Control,
+//! Date-Time and MMI. CA PMT is not implemented yet.
 
 mod apdu;
 mod asn1;

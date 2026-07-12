@@ -14,8 +14,8 @@ Supports three types of delivery systems:
 
 DVB-CI (EN 50221) support currently includes a runtime-neutral
 `CiController`, the link, transport and session layers, and Resource
-Manager, Application Information, Host Control, Date-Time and high-level
-MMI resources. Conditional Access Support and CA PMT are not implemented
+Manager, Application Information, Conditional Access Support, Host
+Control, Date-Time and high-level MMI resources. CA PMT is not implemented
 yet.
 
 ## FeDevice
@@ -158,7 +158,9 @@ println!("MAC: {}", interface.mac());
 `CREATE_TC`, transport polling, `RCV` and timeout recovery. It does not
 create a thread or own an event loop: integrate its file descriptor into
 the application runtime, drain `poll_event()` when readable and call
-`tick()` from a monotonic timer:
+`tick()` from a monotonic timer. A CAM reaches `CamStatus::Ready` after
+valid Application Information and CA Information replies; use `caids()`
+for the deduplicated slot list or `session_caids()` for one CA application:
 
 ```rust,no_run
 use std::time::Instant;
@@ -175,6 +177,9 @@ while let Some(event) = ci.poll_event()? {
     match event {
         CaEvent::SlotStatusChanged { slot_id, new, .. } => {
             println!("CI slot {slot_id}: {new:?}");
+        }
+        CaEvent::CaInfo { slot_id, session_id, caids } => {
+            println!("CI slot {slot_id}, CA session {session_id}: {caids:X?}");
         }
         event => println!("CI: {event:?}"),
     }

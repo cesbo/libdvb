@@ -5,6 +5,7 @@
 //! [`ResourceRegistry`].
 
 pub(super) mod application_info;
+pub(super) mod conditional_access;
 pub(super) mod date_time;
 pub(super) mod host_control;
 pub(super) mod mmi;
@@ -34,7 +35,6 @@ pub struct ResourceId(u32);
 impl ResourceId {
     pub const RESOURCE_MANAGER: Self = Self(0x0001_0041);
     pub const APPLICATION_INFORMATION: Self = Self(0x0002_0041);
-    /// Conditional Access support (future)
     pub const CONDITIONAL_ACCESS_SUPPORT: Self = Self(0x0003_0041);
     pub const HOST_CONTROL: Self = Self(0x0020_0041);
     pub const DATE_TIME: Self = Self(0x0024_0041);
@@ -129,9 +129,10 @@ pub(super) trait Resource {
 }
 
 /// Resource ids offered to modules in the profile reply
-const HOST_PROFILE: [ResourceId; 5] = [
+const HOST_PROFILE: [ResourceId; 6] = [
     ResourceId::RESOURCE_MANAGER,
     ResourceId::APPLICATION_INFORMATION,
+    ResourceId::CONDITIONAL_ACCESS_SUPPORT,
     ResourceId::HOST_CONTROL,
     ResourceId::DATE_TIME,
     ResourceId::MMI,
@@ -141,6 +142,7 @@ const HOST_PROFILE: [ResourceId; 5] = [
 pub(super) struct ResourceRegistry {
     pub rm: rm::ResourceManager,
     pub application_info: application_info::ApplicationInfoResource,
+    pub conditional_access: conditional_access::ConditionalAccessResource,
     pub host_control: host_control::HostControlResource,
     pub date_time: date_time::DateTimeResource,
     pub mmi: mmi::MmiResource,
@@ -151,16 +153,18 @@ impl ResourceRegistry {
         ResourceRegistry {
             rm: rm::ResourceManager::new(&HOST_PROFILE),
             application_info: application_info::ApplicationInfoResource::new(),
+            conditional_access: conditional_access::ConditionalAccessResource::new(),
             host_control: host_control::HostControlResource,
             date_time: date_time::DateTimeResource::new(),
             mmi: mmi::MmiResource::new(),
         }
     }
 
-    fn resources(&mut self) -> [&mut dyn Resource; 5] {
+    fn resources(&mut self) -> [&mut dyn Resource; 6] {
         [
             &mut self.rm,
             &mut self.application_info,
+            &mut self.conditional_access,
             &mut self.host_control,
             &mut self.date_time,
             &mut self.mmi,

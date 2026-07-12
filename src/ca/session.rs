@@ -103,6 +103,14 @@ pub enum CaEvent {
     },
     /// application_info: the module identified itself
     ApplicationInfo { slot_id: u8, info: ApplicationInfo },
+    /// ca_info: one Conditional Access application reported the CA
+    /// systems it supports
+    CaInfo {
+        slot_id: u8,
+        session_id: u16,
+        /// CA_system_id values in the order supplied by the module
+        caids: Vec<u16>,
+    },
     /// close_mmi: the module asks to close the dialogue; `delay` is the
     /// close delay in seconds when the module asked for a deferred close
     MmiClose { slot_id: u8, delay: Option<u8> },
@@ -318,10 +326,90 @@ impl CiSession {
         self.resources.application_info.info(slot_id)
     }
 
+    /// Sorted, deduplicated union of CAIDs reported by all live
+    /// Conditional Access Support sessions in the slot
+    pub fn caids(&self, slot_id: u8) -> Vec<u16> {
+        let mut caids = Vec::new();
+        for (index, session) in self.sessions.iter().enumerate() {
+            let Some(session) = session else {
+                continue;
+            };
+            if session.slot_id != slot_id
+                || session.resource_id.base() != ResourceId::CONDITIONAL_ACCESS_SUPPORT.base()
+                || !matches!(session.state, SessionState::Active)
+            {
+                continue;
+            }
+
+            if let Some(session_caids) = self
+                .resources
+                .conditional_access
+                .session_caids(slot_id, (index + 1) as u16)
+            {
+                caids.extend_from_slice(session_caids);
+            }
+        }
+        caids.sort_unstable();
+        caids.dedup();
+        caids
+    }
+
+    /// CAIDs reported by one live Conditional Access Support session
+    ///
+    /// `None` means the session is unknown, belongs to another slot, or
+    /// has not replied with CA_INFO yet. A confirmed empty CA_INFO is
+    /// returned as `Some(&[])`.
+    pub fn session_caids(&self, slot_id: u8, session_id: u16) -> Option<&[u16]> {
+        let session = self.session(session_id)?;
+        if session.slot_id != slot_id
+            || session.resource_id.base() != ResourceId::CONDITIONAL_ACCESS_SUPPORT.base()
+            || !matches!(session.state, SessionState::Active)
+        {
+            return None;
+        }
+
+        self.resources
+            .conditional_access
+            .session_caids(slot_id, session_id)
+    }
+
+    pub(crate) fn has_ca_info(&self, slot_id: u8) -> bool {
+        self.sessions.iter().enumerate().any(|(index, session)| {
+            session.as_ref().is_some_and(|session| {
+                session.slot_id == slot_id
+                    && session.resource_id.base() == ResourceId::CONDITIONAL_ACCESS_SUPPORT.base()
+                    && matches!(session.state, SessionState::Active)
+                    && self
+                        .resources
+                        .conditional_access
+                        .session_caids(slot_id, (index + 1) as u16)
+                        .is_some()
+            })
+        })
+    }
+
     /// Asks the module to show its menu (enter_menu on the application
     /// information session)
     pub fn enter_menu(&mut self, slot_id: u8) -> Result<()> {
-        let session_id = self.find_session(slot_id, ResourceId::APPLICATION_INFORMATION)?;
+        let confirmed_session = self
+            .resources
+            .application_info
+            .info_session(slot_id)
+            .map(|(session_id, _)| session_id)
+            .filter(|&session_id| {
+                matches!(
+                    self.session(session_id),
+                    Some(session)
+                        if session.slot_id == slot_id
+                            && session.resource_id.base()
+                                == ResourceId::APPLICATION_INFORMATION.base()
+                            && matches!(session.state, SessionState::Active)
+                )
+            });
+        let session_id = match confirmed_session {
+            Some(session_id) => session_id,
+            None => self.find_session(slot_id, ResourceId::APPLICATION_INFORMATION)?,
+        };
         self.transport
             .send_apdu(slot_id, session_id, ApduTag::ENTER_MENU, &[])
     }
@@ -468,13 +556,18 @@ impl CiSession {
     /// Handles open_session_request: allocates a session, replies and
     /// runs the resource open callback
     fn open_session(&mut self, slot_id: u8, resource_id: ResourceId) -> Result<()> {
+        let available_resource_id = self
+            .resources
+            .lookup(resource_id)
+            .map(|resource| resource.resource_id());
+        let response_resource_id = available_resource_id.unwrap_or(resource_id);
         let mut session_id = 0;
-        let status = match self.resources.lookup(resource_id) {
+        let status = match available_resource_id {
             None => spdu::SS_NOT_ALLOCATED,
-            Some(resource) if resource_id.version() > resource.resource_id().version() => {
+            Some(available) if resource_id.version() > available.version() => {
                 spdu::SS_LOWER_VERSION
             }
-            Some(_) => match self.alloc_session(slot_id, resource_id) {
+            Some(available) => match self.alloc_session(slot_id, available) {
                 Some(allocated) => {
                     session_id = allocated;
                     spdu::SS_OK
@@ -483,7 +576,7 @@ impl CiSession {
             },
         };
 
-        let response = spdu::build_open_session_response(status, resource_id, session_id);
+        let response = spdu::build_open_session_response(status, response_resource_id, session_id);
         self.transport.send_spdu(slot_id, &response)?;
 
         if status != spdu::SS_OK {
@@ -498,12 +591,12 @@ impl CiSession {
         self.events.push_back(CaEvent::SessionOpened {
             slot_id,
             session_id,
-            resource_id,
+            resource_id: response_resource_id,
         });
 
         let resource = self
             .resources
-            .lookup(resource_id)
+            .lookup(response_resource_id)
             .expect("the resource is present: the session was allocated");
         let mut ctx = ResourceContext {
             transport: &mut self.transport,
@@ -759,9 +852,13 @@ mod tests {
         /// Sends an APDU on the session wrapped into a data R_TPDU on
         /// slot 0
         fn send_apdu(&mut self, session_id: u16, tag: ApduTag, body: &[u8]) {
+            self.send_apdu_slot(0, session_id, tag, body);
+        }
+
+        fn send_apdu_slot(&mut self, slot_id: u8, session_id: u16, tag: ApduTag, body: &[u8]) {
             let mut payload = spdu::build_session_number(session_id);
             apdu::build(&mut payload, tag, body);
-            self.send_spdu(&payload);
+            self.send_slot(slot_id, TpduTag::DATA_LAST, &payload);
         }
 
         /// Reads one C_TPDU frame from the link
@@ -843,11 +940,32 @@ mod tests {
     /// Opens a session to the resource consuming the handshake frames;
     /// returns the allocated session id
     fn open_session(session: &mut CiSession, cam: &mut TestCam, resource_id: ResourceId) -> u16 {
-        cam.send_spdu(&open_session_request(resource_id));
-        pump(session, cam);
+        open_session_slot(session, cam, 0, resource_id)
+    }
+
+    fn open_session_slot(
+        session: &mut CiSession,
+        cam: &mut TestCam,
+        slot_id: u8,
+        resource_id: ResourceId,
+    ) -> u16 {
+        if slot_id == 0 {
+            cam.send_spdu(&open_session_request(resource_id));
+        } else {
+            cam.send_slot(
+                slot_id,
+                TpduTag::DATA_LAST,
+                &open_session_request(resource_id),
+            );
+        }
+        pump_slot(session, cam, slot_id);
 
         match events(session).first() {
-            Some(&CaEvent::SessionOpened { session_id, .. }) => session_id,
+            Some(&CaEvent::SessionOpened {
+                slot_id: event_slot,
+                session_id,
+                ..
+            }) if event_slot == slot_id => session_id,
             event => panic!("expected SessionOpened, got {:?}", event),
         }
     }
@@ -902,10 +1020,11 @@ mod tests {
         // profile_enq: the host replies profile with its resource list
         cam.send_apdu(1, ApduTag::PROFILE_ENQ, &[]);
         let spdus = pump(&mut session, &mut cam);
-        let mut expected = vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x11, 20];
+        let mut expected = vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x11, 24];
         expected.extend_from_slice(&[
             0x00, 0x01, 0x00, 0x41, // Resource Manager
             0x00, 0x02, 0x00, 0x41, // Application Information
+            0x00, 0x03, 0x00, 0x41, // Conditional Access Support
             0x00, 0x20, 0x00, 0x41, // Host Control
             0x00, 0x24, 0x00, 0x41, // Date-Time
             0x00, 0x40, 0x00, 0x41, // MMI
@@ -918,37 +1037,59 @@ mod tests {
     fn test_open_session_refused() {
         let (mut session, mut cam) = pair();
 
-        // the CA support resource is not implemented yet
-        cam.send_spdu(&open_session_request(
-            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
-        ));
+        // an unknown resource class
+        let unknown = ResourceId::new(0x00FF_0041);
+        cam.send_spdu(&open_session_request(unknown));
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(
             spdus,
-            vec![vec![0x92, 0x07, 0xF0, 0x00, 0x03, 0x00, 0x41, 0x00, 0x00]]
+            vec![vec![0x92, 0x07, 0xF0, 0x00, 0xFF, 0x00, 0x41, 0x00, 0x00]]
         );
         assert_eq!(
             events(&mut session),
             vec![CaEvent::SessionRefused {
                 slot_id: 0,
-                resource_id: ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+                resource_id: unknown,
                 status: 0xF0,
             }]
         );
 
         // a higher resource version than the host provides
-        cam.send_spdu(&open_session_request(ResourceId::new(0x0001_0042)));
+        cam.send_spdu(&open_session_request(ResourceId::new(0x0003_0042)));
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(
             spdus,
-            vec![vec![0x92, 0x07, 0xF2, 0x00, 0x01, 0x00, 0x42, 0x00, 0x00]]
+            vec![vec![0x92, 0x07, 0xF2, 0x00, 0x03, 0x00, 0x41, 0x00, 0x00]]
         );
         assert_eq!(
             events(&mut session),
             vec![CaEvent::SessionRefused {
                 slot_id: 0,
-                resource_id: ResourceId::new(0x0001_0042),
+                resource_id: ResourceId::new(0x0003_0042),
                 status: 0xF2,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_open_lower_resource_version_uses_host_version() {
+        let (mut session, mut cam) = pair();
+
+        cam.send_spdu(&open_session_request(ResourceId::new(0x0003_0040)));
+        let spdus = pump(&mut session, &mut cam);
+        assert_eq!(
+            spdus,
+            vec![
+                vec![0x92, 0x07, 0x00, 0x00, 0x03, 0x00, 0x41, 0x00, 0x01],
+                vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x30, 0x00],
+            ]
+        );
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::SessionOpened {
+                slot_id: 0,
+                session_id: 1,
+                resource_id: ResourceId::CONDITIONAL_ACCESS_SUPPORT,
             }]
         );
     }
@@ -1033,6 +1174,220 @@ mod tests {
             spdus,
             vec![vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x22, 0x00]]
         );
+    }
+
+    #[test]
+    fn test_application_info_survives_another_session_close() {
+        let (mut session, mut cam) = pair();
+        let first = open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
+        let second = open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
+
+        // The first session is still pending; the confirmed second session
+        // supplies both app_info() and the target for enter_menu().
+        cam.send_apdu(
+            second,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0, 2, 0, 2, 3, b'T', b'w', b'o'],
+        );
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(session.app_info(0).unwrap().menu_string, b"Two");
+        session.enter_menu(0).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x90, 0x02, 0x00, 0x02, 0x9F, 0x80, 0x22, 0x00]]
+        );
+
+        // A later reply becomes the selected application.
+        cam.send_apdu(
+            first,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0, 1, 0, 1, 3, b'O', b'n', b'e'],
+        );
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(session.app_info(0).unwrap().menu_string, b"One");
+        session.enter_menu(0).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x22, 0x00]]
+        );
+
+        cam.send_spdu(&[0x95, 0x02, 0x00, first as u8]);
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(session.app_info(0).unwrap().menu_string, b"Two");
+    }
+
+    #[test]
+    fn test_conditional_access_info() {
+        let (mut session, mut cam) = pair();
+
+        cam.send_spdu(&open_session_request(
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        ));
+        let spdus = pump(&mut session, &mut cam);
+        assert_eq!(
+            spdus,
+            vec![
+                vec![0x92, 0x07, 0x00, 0x00, 0x03, 0x00, 0x41, 0x00, 0x01],
+                vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x80, 0x30, 0x00],
+            ]
+        );
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::SessionOpened {
+                slot_id: 0,
+                session_id: 1,
+                resource_id: ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            }]
+        );
+        assert_eq!(session.session_caids(0, 1), None);
+        assert!(session.caids(0).is_empty());
+
+        // Session-level data preserves the module order and duplicates;
+        // the slot aggregate is deterministic and deduplicated.
+        cam.send_apdu(
+            1,
+            ApduTag::CA_INFO,
+            &[0x05, 0x00, 0x01, 0x00, 0x05, 0x00, 0x0B, 0x00],
+        );
+        assert!(pump(&mut session, &mut cam).is_empty());
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::CaInfo {
+                slot_id: 0,
+                session_id: 1,
+                caids: vec![0x0500, 0x0100, 0x0500, 0x0B00],
+            }]
+        );
+        assert_eq!(
+            session.session_caids(0, 1),
+            Some([0x0500, 0x0100, 0x0500, 0x0B00].as_slice())
+        );
+        assert_eq!(session.caids(0), [0x0100, 0x0500, 0x0B00]);
+
+        // A malformed replacement is reported but leaves the last valid
+        // list intact.
+        cam.send_apdu(1, ApduTag::CA_INFO, &[0x01, 0x00, 0xFF]);
+        pump(&mut session, &mut cam);
+        assert!(matches!(
+            events(&mut session).as_slice(),
+            [CaEvent::Malformed { slot_id: 0, .. }]
+        ));
+        assert_eq!(
+            session.session_caids(0, 1),
+            Some([0x0500, 0x0100, 0x0500, 0x0B00].as_slice())
+        );
+
+        // Empty CA_INFO is a valid confirmed replacement, not the same as
+        // a missing reply.
+        cam.send_apdu(1, ApduTag::CA_INFO, &[]);
+        pump(&mut session, &mut cam);
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::CaInfo {
+                slot_id: 0,
+                session_id: 1,
+                caids: Vec::new(),
+            }]
+        );
+        assert_eq!(session.session_caids(0, 1), Some([].as_slice()));
+
+        cam.send_spdu(&[0x95, 0x02, 0x00, 0x01]);
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x96, 0x03, 0x00, 0x00, 0x01]]
+        );
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::SessionClosed {
+                slot_id: 0,
+                session_id: 1,
+                resource_id: ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            }]
+        );
+        assert_eq!(session.session_caids(0, 1), None);
+        assert!(session.caids(0).is_empty());
+    }
+
+    #[test]
+    fn test_conditional_access_sessions_are_independent() {
+        let (mut session, mut cam) = pair();
+        let first = open_session(
+            &mut session,
+            &mut cam,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        );
+        let second = open_session(
+            &mut session,
+            &mut cam,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        );
+        assert_eq!((first, second), (1, 2));
+
+        cam.send_apdu(first, ApduTag::CA_INFO, &[0x05, 0x00, 0x01, 0x00]);
+        cam.send_apdu(second, ApduTag::CA_INFO, &[0x06, 0x04, 0x05, 0x00]);
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(
+            session.session_caids(0, first),
+            Some([0x0500, 0x0100].as_slice())
+        );
+        assert_eq!(
+            session.session_caids(0, second),
+            Some([0x0604, 0x0500].as_slice())
+        );
+        assert_eq!(session.caids(0), [0x0100, 0x0500, 0x0604]);
+
+        cam.send_spdu(&[0x95, 0x02, 0x00, first as u8]);
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(session.session_caids(0, first), None);
+        assert_eq!(session.caids(0), [0x0500, 0x0604]);
+
+        // Reusing the freed number starts without the old CA_INFO.
+        let reused = open_session(
+            &mut session,
+            &mut cam,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        );
+        assert_eq!(reused, first);
+        assert_eq!(session.session_caids(0, reused), None);
+        assert_eq!(session.caids(0), [0x0500, 0x0604]);
+    }
+
+    #[test]
+    fn test_conditional_access_caids_do_not_cross_slots() {
+        let (mut session, mut cam) = pair_slots(2);
+        let first = open_session_slot(
+            &mut session,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        );
+        let second = open_session_slot(
+            &mut session,
+            &mut cam,
+            1,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+        );
+
+        cam.send_apdu_slot(0, first, ApduTag::CA_INFO, &[0x01, 0x00]);
+        pump_slot(&mut session, &mut cam, 0);
+        cam.send_apdu_slot(1, second, ApduTag::CA_INFO, &[0x06, 0x04]);
+        pump_slot(&mut session, &mut cam, 1);
+        events(&mut session);
+
+        assert_eq!(session.caids(0), [0x0100]);
+        assert_eq!(session.caids(1), [0x0604]);
+        assert_eq!(session.session_caids(0, second), None);
+        assert_eq!(session.session_caids(1, first), None);
+
+        session.drop_slot(0);
+        events(&mut session);
+        assert!(session.caids(0).is_empty());
+        assert_eq!(session.caids(1), [0x0604]);
     }
 
     #[test]
