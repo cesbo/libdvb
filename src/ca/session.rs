@@ -532,9 +532,13 @@ impl CiSession {
     /// Starts a host-initiated session close; a second request for a
     /// session already closing is not sent
     fn request_close(&mut self, slot_id: u8, session_id: u16) -> Result<()> {
-        let index = usize::from(session_id - 1);
+        let Some(index) = session_id.checked_sub(1).map(usize::from) else {
+            return Ok(());
+        };
         match self.sessions.get_mut(index) {
-            Some(Some(session)) if matches!(session.state, SessionState::Active) => {
+            Some(Some(session))
+                if session.slot_id == slot_id && matches!(session.state, SessionState::Active) =>
+            {
                 session.state = SessionState::Closing;
             }
             _ => return Ok(()),
@@ -575,16 +579,14 @@ impl CiSession {
     }
 
     /// Handles close_session_response completing a host-initiated close
-    fn close_session_complete(&mut self, slot_id: u8, session_id: u16, _status: u8) {
+    fn close_session_complete(&mut self, slot_id: u8, session_id: u16, status: u8) {
         let closing = matches!(
             self.session(session_id),
             Some(session) if session.slot_id == slot_id
                 && matches!(session.state, SessionState::Closing)
         );
 
-        if closing {
-            self.free_session(session_id);
-        } else {
+        if !closing {
             self.events.push_back(CaEvent::Malformed {
                 slot_id,
                 context: format!(
@@ -592,6 +594,25 @@ impl CiSession {
                     slot_id, session_id
                 ),
             });
+            return;
+        }
+
+        match status {
+            // SS_NOT_ALLOCATED also means that the peer has no session to
+            // communicate on, so the local half must be released.
+            spdu::SS_OK | spdu::SS_NOT_ALLOCATED => self.free_session(session_id),
+            status => {
+                if let Some(Some(session)) = self.sessions.get_mut(usize::from(session_id - 1)) {
+                    session.state = SessionState::Active;
+                }
+                self.events.push_back(CaEvent::Malformed {
+                    slot_id,
+                    context: format!(
+                        "ca slot {}: invalid close response status 0x{:02X} for session {}",
+                        slot_id, status, session_id
+                    ),
+                });
+            }
         }
     }
 }
@@ -605,7 +626,10 @@ mod tests {
             Read,
             Write,
         },
-        os::fd::FromRawFd,
+        os::{
+            fd::OwnedFd,
+            unix::net::UnixDatagram,
+        },
     };
 
     use super::{
@@ -617,26 +641,20 @@ mod tests {
         *,
     };
 
-    /// The module side of a socketpair link: SOCK_SEQPACKET keeps the
-    /// message boundaries exactly like the kernel CA device does
+    /// The module side of a socketpair link: SOCK_DGRAM is available on
+    /// Linux and macOS and keeps message boundaries like the kernel CA
+    /// device does
     struct TestCam {
         file: File,
     }
 
     fn pair_slots(slots_num: u8) -> (CiSession, TestCam) {
-        let mut fds = [0; 2];
-        let result = unsafe {
-            nix::libc::socketpair(
-                nix::libc::AF_UNIX,
-                nix::libc::SOCK_SEQPACKET | nix::libc::SOCK_NONBLOCK,
-                0,
-                fds.as_mut_ptr(),
-            )
-        };
-        assert_eq!(result, 0);
+        let (host, cam) = UnixDatagram::pair().unwrap();
+        host.set_nonblocking(true).unwrap();
+        cam.set_nonblocking(true).unwrap();
 
-        let host = unsafe { File::from_raw_fd(fds[0]) };
-        let cam = unsafe { File::from_raw_fd(fds[1]) };
+        let host = File::from(OwnedFd::from(host));
+        let cam = File::from(OwnedFd::from(cam));
 
         let session = CiSession::new(CiTransport::new(CaDevice::from_file(host), slots_num));
 
@@ -1230,6 +1248,49 @@ mod tests {
             events(&mut session).as_slice(),
             [CaEvent::Malformed { slot_id: 0, .. }]
         ));
+    }
+
+    #[test]
+    fn test_close_session_response_status() {
+        // F0 says that the peer no longer has the session. The local half is
+        // released just like it is after a successful close.
+        let (mut session, mut cam) = pair();
+        let session_id = open_session(&mut session, &mut cam, ResourceId::MMI);
+        session.request_close(0, session_id).unwrap();
+        pump(&mut session, &mut cam);
+
+        cam.send_spdu(&[0x96, 0x03, spdu::SS_NOT_ALLOCATED, 0x00, 0x01]);
+        pump(&mut session, &mut cam);
+        assert_eq!(
+            events(&mut session),
+            vec![CaEvent::SessionClosed {
+                slot_id: 0,
+                session_id,
+                resource_id: ResourceId::MMI,
+            }]
+        );
+        assert!(session.mmi_menu_answer(0, 1).is_err());
+
+        // Reserved status values do not prove that the peer closed the
+        // session. Report the bad response and restore the active state so
+        // the application is not left with an unusable closing session.
+        let (mut session, mut cam) = pair();
+        let session_id = open_session(&mut session, &mut cam, ResourceId::MMI);
+        session.request_close(0, session_id).unwrap();
+        pump(&mut session, &mut cam);
+
+        cam.send_spdu(&[0x96, 0x03, 0x01, 0x00, 0x01]);
+        pump(&mut session, &mut cam);
+        assert!(matches!(
+            events(&mut session).as_slice(),
+            [CaEvent::Malformed { slot_id: 0, .. }]
+        ));
+
+        session.mmi_menu_answer(0, 1).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x88, 0x0B, 0x01, 0x01]]
+        );
     }
 
     #[test]

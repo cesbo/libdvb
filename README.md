@@ -12,10 +12,10 @@ Supports three types of delivery systems:
 - EN 50494 - Unicable I
 - EN 50607 - Unicable II
 
-TODO:
-
-- Cenelec EN 50221 - Common Interface Specification for Conditional Access and
-  other Digital Video Broadcasting Decoder Applications
+DVB-CI (EN 50221) support currently includes the link, transport and
+session layers together with Resource Manager, Application Information,
+Host Control, Date-Time and high-level MMI resources. Conditional Access
+Support and CA PMT are not implemented yet.
 
 ## FeDevice
 
@@ -153,8 +153,9 @@ println!("MAC: {}", interface.mac());
 
 ## File Descriptors
 
-CA, demux, DVR, frontend, and network device handles open in blocking mode by
-default and implement `AsFd` and `AsRawFd`, so callers can pass them to APIs
+Demux, DVR, frontend, and network device handles open in blocking mode by default.
+The CA device opens in non-blocking mode as required by the CI transport.
+All device handles implement `AsFd` and `AsRawFd`, so callers can pass them to APIs
 that operate on borrowed or raw file descriptors.
 
 ## Code Formatting

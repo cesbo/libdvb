@@ -223,23 +223,52 @@ impl CiTransport {
 
     /// Writes the next queued TPDU if the slot is idle (one frame only)
     ///
-    /// A link write error propagates as `Err` with the frame dropped and
-    /// the slot left idle (legacy parity); the slot manager resets the
-    /// slot in that case.
+    /// A transient `WouldBlock` or `Interrupted` error leaves the frame at
+    /// the head of the queue and the slot idle. The caller can retry `flush`
+    /// when the descriptor becomes writable. Other link errors propagate
+    /// with the failed frame dropped; the slot manager is expected to reset
+    /// the slot in that case.
     pub fn flush(&mut self, slot_id: u8) -> Result<()> {
         self.check_slot(slot_id)?;
 
         let slot = &mut self.slots[usize::from(slot_id)];
+        Self::flush_slot(slot, |frame| self.link.send_msg(frame))
+    }
+
+    /// Attempts one queued write. Kept separate from the device wrapper so
+    /// the queue transition can be tested with deterministic write results.
+    fn flush_slot(slot: &mut TransportSlot, send: impl FnOnce(&[u8]) -> Result<()>) -> Result<()> {
         if slot.busy {
             return Ok(());
         }
-        let frame = match slot.queue.pop_front() {
+        let frame = match slot.queue.front() {
             Some(frame) => frame,
             None => return Ok(()),
         };
 
-        self.link.send_msg(&frame)?;
-        self.slots[usize::from(slot_id)].busy = true;
+        match send(frame) {
+            Ok(()) => {
+                slot.queue.pop_front();
+                slot.busy = true;
+            }
+            Err(Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                // The frame has not been accepted by the non-blocking link.
+                // Keep it queued so a writable event can retry it.
+            }
+            Err(e) => {
+                // A short write or a permanent link failure leaves the
+                // command/response state ambiguous. Drop this frame and let
+                // the caller reset the slot rather than resend a potentially
+                // partially accepted command.
+                slot.queue.pop_front();
+                return Err(e);
+            }
+        }
 
         Ok(())
     }
@@ -352,5 +381,76 @@ impl CiTransport {
             slot.rx_buffer.clear();
             slot.data_pending = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::File,
+        os::{
+            fd::OwnedFd,
+            unix::net::UnixDatagram,
+        },
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_transient_write_error_keeps_queued_frame() {
+        for kind in [
+            std::io::ErrorKind::WouldBlock,
+            std::io::ErrorKind::Interrupted,
+        ] {
+            let mut slot = TransportSlot::new();
+            slot.queue.push_back(vec![0x01, 0x02, 0x03]);
+
+            CiTransport::flush_slot(&mut slot, |_| Err(Error::Io(std::io::Error::from(kind))))
+                .unwrap();
+
+            assert_eq!(slot.queue, [vec![0x01, 0x02, 0x03]]);
+            assert!(!slot.busy);
+
+            CiTransport::flush_slot(&mut slot, |_| Ok(())).unwrap();
+            assert!(slot.queue.is_empty());
+            assert!(slot.busy);
+        }
+    }
+
+    #[test]
+    fn test_permanent_write_error_drops_ambiguous_frame() {
+        let mut slot = TransportSlot::new();
+        slot.queue.push_back(vec![0x01]);
+        slot.queue.push_back(vec![0x02]);
+
+        let result = CiTransport::flush_slot(&mut slot, |_| {
+            Err(Error::Io(std::io::Error::from(
+                std::io::ErrorKind::BrokenPipe,
+            )))
+        });
+
+        assert!(result.is_err());
+        assert_eq!(slot.queue, [vec![0x02]]);
+        assert!(!slot.busy);
+    }
+
+    #[test]
+    fn test_malformed_header_is_attributed_to_physical_slot() {
+        let (host, cam) = UnixDatagram::pair().unwrap();
+        host.set_nonblocking(true).unwrap();
+        let host = File::from(OwnedFd::from(host));
+        let mut transport = CiTransport::new(CaDevice::from_file(host), 2);
+        transport.slots[0].busy = true;
+        transport.slots[1].busy = true;
+
+        // Physical slot 0 with the transport connection id of slot 1.
+        cam.send(&[0x00, 0x02, 0x80, 0x02, 0x02, 0x00]).unwrap();
+
+        assert!(matches!(
+            transport.recv_apdu().unwrap(),
+            Some(TransportRecv::Malformed { slot_id: 0, .. })
+        ));
+        assert!(!transport.slots[0].busy);
+        assert!(transport.slots[1].busy);
     }
 }

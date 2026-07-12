@@ -134,16 +134,8 @@ pub struct RTpdu<'a> {
 }
 
 pub fn frame_slot_id(frame: &[u8], slots_num: u8) -> Option<u8> {
-    if frame.len() < 5 {
-        return None;
-    }
-
-    let t_c_id = frame[1];
-    if t_c_id == 0 || t_c_id > slots_num {
-        return None;
-    }
-
-    Some(t_c_id - 1)
+    let slot_id = frame.first().copied()?;
+    (slot_id < slots_num).then_some(slot_id)
 }
 
 /// Parses one R_TPDU read from the link
@@ -163,6 +155,12 @@ pub fn parse(frame: &[u8], slots_num: u8) -> Result<RTpdu<'_>> {
         )));
     }
     let slot_id = t_c_id - 1;
+    if frame[0] != slot_id {
+        return Err(Error::InvalidData(format!(
+            "ca slot id {} does not match t_c_id {}",
+            frame[0], t_c_id
+        )));
+    }
     let tag = TpduTag::new(frame[2]);
 
     // the last 4 bytes must be the status object [SB, 2, t_c_id, status]
@@ -360,6 +358,15 @@ mod tests {
         assert!(parse(&[0x00, 0x00, 0x80, 0x02, 0x00, 0x00], 1).is_err());
         // t_c_id above slots_num
         assert!(parse(&[0x01, 0x02, 0x80, 0x02, 0x02, 0x00], 1).is_err());
+        // link-layer slot id must agree with t_c_id - 1
+        assert!(parse(&[0x01, 0x01, 0x80, 0x02, 0x01, 0x00], 2).is_err());
+        // malformed frames are attributed by their physical slot byte, not
+        // by a mismatched transport connection id
+        assert_eq!(
+            frame_slot_id(&[0x00, 0x02, 0x80, 0x02, 0x02, 0x00], 2),
+            Some(0)
+        );
+        assert_eq!(frame_slot_id(&[0x02], 2), None);
     }
 
     #[test]
