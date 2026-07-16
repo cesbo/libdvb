@@ -200,6 +200,7 @@ impl Resource for MmiResource {
                 };
                 ctx.event(CaEvent::MmiClose {
                     slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
                     delay,
                 });
                 // the dialogue is over: take the session down
@@ -222,6 +223,7 @@ impl Resource for MmiResource {
                 let text = self.take_object(ctx.session_id, body);
                 ctx.event(CaEvent::MmiText {
                     slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
                     text,
                 });
 
@@ -236,6 +238,7 @@ impl Resource for MmiResource {
                 }
                 ctx.event(CaEvent::MmiEnq {
                     slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
                     blind: (body[0] & 0x01) != 0,
                     answer_len: body[1],
                     text: body[2 ..].to_vec(),
@@ -247,6 +250,7 @@ impl Resource for MmiResource {
                 let object = self.take_object(ctx.session_id, body);
                 ctx.event(CaEvent::MmiMenu {
                     slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
                     menu: parse_menu(&object),
                 });
 
@@ -256,6 +260,7 @@ impl Resource for MmiResource {
                 let object = self.take_object(ctx.session_id, body);
                 ctx.event(CaEvent::MmiList {
                     slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
                     menu: parse_menu(&object),
                 });
 

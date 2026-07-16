@@ -114,18 +114,35 @@ pub enum CaEvent {
     },
     /// close_mmi: the module asks to close the dialogue; `delay` is the
     /// close delay in seconds when the module asked for a deferred close
-    MmiClose { slot_id: u8, delay: Option<u8> },
+    MmiClose {
+        slot_id: u8,
+        session_id: u16,
+        delay: Option<u8>,
+    },
     /// text_last: a standalone text object to display
-    MmiText { slot_id: u8, text: Vec<u8> },
+    MmiText {
+        slot_id: u8,
+        session_id: u16,
+        text: Vec<u8>,
+    },
     /// menu_last: a menu to display; the selection is answered with
     /// [`CiSession::mmi_menu_answer`]
-    MmiMenu { slot_id: u8, menu: MmiMenu },
+    MmiMenu {
+        slot_id: u8,
+        session_id: u16,
+        menu: MmiMenu,
+    },
     /// list_last: a list to display; unlike a menu it needs no answer
-    MmiList { slot_id: u8, menu: MmiMenu },
+    MmiList {
+        slot_id: u8,
+        session_id: u16,
+        menu: MmiMenu,
+    },
     /// enq: the module asks the user for a text answer (a PIN code
     /// usually), answered with [`CiSession::mmi_answer`]
     MmiEnq {
         slot_id: u8,
+        session_id: u16,
         /// mask the user input
         blind: bool,
         /// expected answer length
@@ -427,26 +444,31 @@ impl CiSession {
             .send_apdu(slot_id, session_id, ApduTag::ENTER_MENU, &[])
     }
 
-    /// Answers a [`CaEvent::MmiMenu`] selection with the 1-based item
-    /// number; 0 cancels the menu
-    pub fn mmi_menu_answer(&mut self, slot_id: u8, choice: u8) -> Result<()> {
-        let session_id = self.find_session(slot_id, ResourceId::MMI)?;
+    /// Answers a [`CaEvent::MmiMenu`] selection on the exact MMI session
+    /// with the 1-based item number; 0 cancels the menu
+    pub fn mmi_menu_answer(&mut self, slot_id: u8, session_id: u16, choice: u8) -> Result<()> {
+        self.require_session(slot_id, session_id, ResourceId::MMI)?;
         self.transport
             .send_apdu(slot_id, session_id, ApduTag::MENU_ANSW, &[choice])
     }
 
-    /// Answers a [`CaEvent::MmiEnq`] enquiry; `None` cancels the
-    /// enquiry
-    pub fn mmi_answer(&mut self, slot_id: u8, answer: Option<&[u8]>) -> Result<()> {
-        let session_id = self.find_session(slot_id, ResourceId::MMI)?;
+    /// Answers a [`CaEvent::MmiEnq`] enquiry on the exact MMI session;
+    /// `None` cancels the enquiry
+    pub fn mmi_answer(
+        &mut self,
+        slot_id: u8,
+        session_id: u16,
+        answer: Option<&[u8]>,
+    ) -> Result<()> {
+        self.require_session(slot_id, session_id, ResourceId::MMI)?;
         self.transport
             .send_apdu(slot_id, session_id, ApduTag::ANSW, &mmi::build_answ(answer))
     }
 
-    /// Asks the module to close the MMI dialogue; the module closes the
-    /// session in response
-    pub fn mmi_close(&mut self, slot_id: u8) -> Result<()> {
-        let session_id = self.find_session(slot_id, ResourceId::MMI)?;
+    /// Asks the module to close the dialogue on the exact MMI session;
+    /// the module closes the session in response
+    pub fn mmi_close(&mut self, slot_id: u8, session_id: u16) -> Result<()> {
+        self.require_session(slot_id, session_id, ResourceId::MMI)?;
         self.transport
             .send_apdu(slot_id, session_id, ApduTag::CLOSE_MMI, &mmi::build_close())
     }
@@ -461,6 +483,24 @@ impl CiSession {
     fn session(&self, session_id: u16) -> Option<&Session> {
         let index = usize::from(session_id.checked_sub(1)?);
         self.sessions.get(index)?.as_ref()
+    }
+
+    /// Requires one exact active session of the slot connected to the resource.
+    fn require_session(&self, slot_id: u8, session_id: u16, resource_id: ResourceId) -> Result<()> {
+        if matches!(
+            self.session(session_id),
+            Some(session)
+                if session.slot_id == slot_id
+                    && session.resource_id.base() == resource_id.base()
+                    && matches!(session.state, SessionState::Active)
+        ) {
+            return Ok(());
+        }
+
+        Err(Error::InvalidProperty(format!(
+            "ca slot {}: no active {:?} session {}",
+            slot_id, resource_id, session_id
+        )))
     }
 
     /// First active session of the slot connected to the resource
@@ -1432,6 +1472,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiMenu {
                 slot_id: 0,
+                session_id,
                 menu: MmiMenu {
                     title: b"Menu".to_vec(),
                     sub_title: Vec::new(),
@@ -1442,7 +1483,7 @@ mod tests {
         );
 
         // the user picks the second item
-        session.mmi_menu_answer(0, 2).unwrap();
+        session.mmi_menu_answer(0, session_id, 2).unwrap();
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(
             spdus,
@@ -1458,13 +1499,16 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiEnq {
                 slot_id: 0,
+                session_id,
                 blind: true,
                 answer_len: 4,
                 text: b"PIN:".to_vec(),
             }]
         );
 
-        session.mmi_answer(0, Some(b"1234")).unwrap();
+        session
+            .mmi_answer(0, session_id, Some(b"1234"))
+            .unwrap();
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(
             spdus,
@@ -1482,6 +1526,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiClose {
                 slot_id: 0,
+                session_id,
                 delay: None,
             }]
         );
@@ -1498,7 +1543,31 @@ mod tests {
         );
 
         // the session is gone
-        assert!(session.mmi_menu_answer(0, 1).is_err());
+        assert!(session.mmi_menu_answer(0, session_id, 1).is_err());
+    }
+
+    #[test]
+    fn test_mmi_commands_target_exact_session() {
+        let (mut session, mut cam) = pair();
+        let first = open_session(&mut session, &mut cam, ResourceId::MMI);
+        let second = open_session(&mut session, &mut cam, ResourceId::MMI);
+
+        session.mmi_menu_answer(0, second, 2).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x90, 0x02, 0x00, 0x02, 0x9F, 0x88, 0x0B, 0x01, 0x02]]
+        );
+
+        session.mmi_answer(0, first, Some(b"1")).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![
+                0x90, 0x02, 0x00, 0x01, 0x9F, 0x88, 0x08, 0x02, 0x01, b'1',
+            ]]
+        );
+
+        assert!(session.mmi_close(1, second).is_err());
+        assert!(pump(&mut session, &mut cam).is_empty());
     }
 
     #[test]
@@ -1546,6 +1615,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiMenu {
                 slot_id: 0,
+                session_id,
                 menu: MmiMenu {
                     title: b"Menu".to_vec(),
                     sub_title: Vec::new(),
@@ -1563,6 +1633,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiText {
                 slot_id: 0,
+                session_id,
                 text: b"Hello, world".to_vec(),
             }]
         );
@@ -1576,6 +1647,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiList {
                 slot_id: 0,
+                session_id,
                 menu: MmiMenu {
                     title: b"Menu".to_vec(),
                     sub_title: Vec::new(),
@@ -1621,6 +1693,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiClose {
                 slot_id: 0,
+                session_id,
                 delay: Some(5),
             }]
         );
@@ -1644,6 +1717,7 @@ mod tests {
             events(&mut session),
             vec![CaEvent::MmiText {
                 slot_id: 0,
+                session_id,
                 text: b"bye".to_vec(),
             }]
         );
@@ -1696,7 +1770,7 @@ mod tests {
                 resource_id: ResourceId::MMI,
             }]
         );
-        assert!(session.mmi_menu_answer(0, 1).is_err());
+        assert!(session.mmi_menu_answer(0, session_id, 1).is_err());
 
         // Reserved status values do not prove that the peer closed the
         // session. Report the bad response and restore the active state so
@@ -1713,7 +1787,7 @@ mod tests {
             [CaEvent::Malformed { slot_id: 0, .. }]
         ));
 
-        session.mmi_menu_answer(0, 1).unwrap();
+        session.mmi_menu_answer(0, session_id, 1).unwrap();
         assert_eq!(
             pump(&mut session, &mut cam),
             vec![vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x88, 0x0B, 0x01, 0x01]]
@@ -1864,7 +1938,7 @@ mod tests {
             }]
         );
 
-        session.mmi_close(1).unwrap();
+        session.mmi_close(1, 2).unwrap();
         let spdus = pump_slot(&mut session, &mut cam, 1);
         assert_eq!(
             spdus,
@@ -2084,7 +2158,7 @@ mod tests {
         let (mut session, mut cam) = pair();
 
         open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
-        open_session(&mut session, &mut cam, ResourceId::MMI);
+        let mmi_session_id = open_session(&mut session, &mut cam, ResourceId::MMI);
         cam.send_apdu(
             1,
             ApduTag::APPLICATION_INFO,
@@ -2112,7 +2186,7 @@ mod tests {
         );
         // the stored application info went away with the slot
         assert!(session.app_info(0).is_none());
-        assert!(session.mmi_menu_answer(0, 1).is_err());
+        assert!(session.mmi_menu_answer(0, mmi_session_id, 1).is_err());
 
         // the slot is usable again
         assert_eq!(

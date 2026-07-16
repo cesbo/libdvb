@@ -353,24 +353,29 @@ impl CiController {
         self.finish_slot_command(slot_id, result)
     }
 
-    /// Answers a menu selection with a 1-based item number; 0 cancels
-    pub fn mmi_menu_answer(&mut self, slot_id: u8, choice: u8) -> Result<()> {
+    /// Answers a menu selection on the MMI session with a 1-based item number; 0 cancels
+    pub fn mmi_menu_answer(&mut self, slot_id: u8, session_id: u16, choice: u8) -> Result<()> {
         self.require_active(slot_id)?;
-        let result = self.session.mmi_menu_answer(slot_id, choice);
+        let result = self.session.mmi_menu_answer(slot_id, session_id, choice);
         self.finish_slot_command(slot_id, result)
     }
 
-    /// Answers an enquiry; `None` cancels it
-    pub fn mmi_answer(&mut self, slot_id: u8, answer: Option<&[u8]>) -> Result<()> {
+    /// Answers an enquiry on the MMI session; `None` cancels it
+    pub fn mmi_answer(
+        &mut self,
+        slot_id: u8,
+        session_id: u16,
+        answer: Option<&[u8]>,
+    ) -> Result<()> {
         self.require_active(slot_id)?;
-        let result = self.session.mmi_answer(slot_id, answer);
+        let result = self.session.mmi_answer(slot_id, session_id, answer);
         self.finish_slot_command(slot_id, result)
     }
 
-    /// Asks the CAM to close the current MMI dialogue
-    pub fn mmi_close(&mut self, slot_id: u8) -> Result<()> {
+    /// Asks the CAM to close the MMI dialogue associated with the session
+    pub fn mmi_close(&mut self, slot_id: u8, session_id: u16) -> Result<()> {
         self.require_active(slot_id)?;
-        let result = self.session.mmi_close(slot_id);
+        let result = self.session.mmi_close(slot_id, session_id);
         self.finish_slot_command(slot_id, result)
     }
 
