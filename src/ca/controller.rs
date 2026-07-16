@@ -26,6 +26,7 @@ use std::{
 
 use super::{
     CaDevice,
+    capmt::Program,
     resource::{
         ApplicationInfo,
         ResourceId,
@@ -302,8 +303,8 @@ impl CiController {
         self.session.app_info(slot_id)
     }
 
-    /// Sorted, deduplicated union of CAIDs reported by the live
-    /// Conditional Access Support sessions in a slot
+    /// Sorted, deduplicated union of CAIDs reported by the live Conditional Access Support sessions
+    /// in a slot
     pub fn caids(&self, slot_id: u8) -> Result<Vec<u16>> {
         self.status(slot_id)?;
         Ok(self.session.caids(slot_id))
@@ -311,12 +312,38 @@ impl CiController {
 
     /// CAIDs reported by one live Conditional Access Support session
     ///
-    /// `None` means the session is unknown, is not active, belongs to
-    /// another slot, or has not replied with CA_INFO yet. A confirmed
-    /// empty CA_INFO is returned as `Some(&[])`.
+    /// `None` means the session is unknown, is not active, belongs to another slot, or has not
+    /// replied with CA_INFO yet. A confirmed empty CA_INFO is returned as `Some(&[])`.
     pub fn session_caids(&self, slot_id: u8, session_id: u16) -> Result<Option<&[u16]>> {
         self.status(slot_id)?;
         Ok(self.session.session_caids(slot_id, session_id))
+    }
+
+    /// Adds or replaces a program in the CAM selection.
+    ///
+    /// `pmt_section` is one complete raw MPEG-TS PMT section including its CRC32. The desired
+    /// program is retained across CAM session reconnections and sent after a matching CA_INFO
+    /// arrives. Returns the `program_number` parsed from the PMT.
+    pub fn set_program(&mut self, pmt_section: &[u8]) -> Result<u16> {
+        let program = Program::parse(pmt_section)?;
+        let program_number = program.program_number();
+        let result = self.session.set_program(program);
+        self.finish_program_command(result)?;
+        Ok(program_number)
+    }
+
+    /// Removes a program from the CAM selection.
+    ///
+    /// Removing an unknown program is a successful no-op. A selected program is withdrawn with
+    /// CA_PMT `NOT_SELECTED` from every matching Conditional Access application.
+    pub fn remove_program(&mut self, program_number: u16) -> Result<()> {
+        if program_number == 0 {
+            return Err(Error::InvalidProperty(
+                "CA program number must not be zero".to_owned(),
+            ));
+        }
+        let result = self.session.remove_program(program_number);
+        self.finish_program_command(result)
     }
 
     /// Asks the CAM to enter its menu
@@ -539,6 +566,27 @@ impl CiController {
                     && let Some(now) = self.event_time()
                 {
                     let _ = self.recover_all(Some(slot_id), CaSlotFailure::LinkFailed, now);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn finish_program_command(&mut self, result: Result<Vec<u8>>) -> Result<()> {
+        match result {
+            Ok(slot_ids) => {
+                if let Some(now) = self.event_time() {
+                    for slot_id in slot_ids {
+                        self.mark_outstanding(slot_id, now);
+                    }
+                }
+                Ok(())
+            }
+            Err(error) => {
+                if is_link_error(&error)
+                    && let Some(now) = self.event_time()
+                {
+                    let _ = self.recover_all(None, CaSlotFailure::LinkFailed, now);
                 }
                 Err(error)
             }
@@ -985,11 +1033,22 @@ mod tests {
         },
     };
 
+    use libmpegts::psi::{
+        PmtBuilder,
+        PmtConfig,
+        PmtStream,
+    };
+
     use super::{
         super::{
             ApduTag,
             apdu,
             asn1,
+            capmt::{
+                CaPmtCommand,
+                CaPmtListManagement,
+                Program,
+            },
             spdu,
             tpdu,
         },
@@ -1224,6 +1283,40 @@ mod tests {
         );
 
         session_id
+    }
+
+    fn pmt_section(program_number: u16, version: u8, caid: u16) -> Vec<u8> {
+        let descriptor = vec![0x09, 0x04, (caid >> 8) as u8, caid as u8, 0xE1, 0xEC];
+        PmtBuilder::build(PmtConfig {
+            program_number,
+            pcr_pid: 0x0100,
+            version,
+            program_descriptors: descriptor,
+            streams: vec![PmtStream {
+                stream_type: 0x1B,
+                elementary_pid: 0x0100,
+                stream_descriptors: Vec::new(),
+            }],
+        })[0]
+            .to_vec()
+    }
+
+    fn ca_pmt_frame(
+        slot_id: u8,
+        session_id: u16,
+        section: &[u8],
+        caid: u16,
+        list_management: CaPmtListManagement,
+        command: CaPmtCommand,
+    ) -> Vec<u8> {
+        let body = Program::parse(section)
+            .unwrap()
+            .build_ca_pmt(&[caid], list_management, command)
+            .unwrap()
+            .unwrap();
+        let mut payload = spdu::build_session_number(session_id);
+        apdu::build(&mut payload, ApduTag::CA_PMT, &body);
+        tpdu::build(slot_id, TpduTag::DATA_LAST, &payload).unwrap()
     }
 
     #[test]
@@ -1851,6 +1944,177 @@ mod tests {
         assert_eq!(controller.cam_status(0).unwrap(), CamStatus::None);
         assert!(controller.caids(0).unwrap().is_empty());
         assert_eq!(controller.session_caids(0, ca_session).unwrap(), None);
+    }
+
+    #[test]
+    fn test_ca_pmt_program_lifecycle_and_session_restore() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        let caid = 0x0100;
+        let first = pmt_section(100, 1, caid);
+        let second = pmt_section(200, 2, caid);
+
+        // Programs may be configured before a CAM or CA session exists.
+        assert_eq!(controller.set_program(&first).unwrap(), 100);
+        assert!(cam.recv().is_none());
+        activate(&mut controller, &mut cam, &state, 0, now);
+
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let events = drain(&mut controller);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            CaEvent::CaInfo {
+                session_id,
+                ..
+            } if *session_id == ca_session
+        )));
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &first,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+
+        // A CA_PMT_REPLY acknowledges the link command and is accepted as
+        // application feedback without producing a malformed event.
+        cam.send_apdu(0, ca_session, ApduTag::CA_PMT_REPLY, &[]);
+        assert!(drain(&mut controller).is_empty());
+        assert!(cam.recv().is_none());
+
+        // Re-applying an identical section is idempotent. A second program
+        // is ADDed, and replacing an existing PMT uses UPDATE.
+        controller.set_program(&first).unwrap();
+        assert!(cam.recv().is_none());
+
+        controller.set_program(&second).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &second,
+                caid,
+                CaPmtListManagement::Add,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        let updated_first = pmt_section(100, 3, caid);
+        controller.set_program(&updated_first).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &updated_first,
+                caid,
+                CaPmtListManagement::Update,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        // If an update stops matching this CA session, withdraw the last
+        // selected form. A later matching update selects it again.
+        let nonmatching_first = pmt_section(100, 4, 0x0500);
+        controller.set_program(&nonmatching_first).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &updated_first,
+                caid,
+                CaPmtListManagement::Update,
+                CaPmtCommand::NotSelected,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        controller.set_program(&updated_first).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &updated_first,
+                caid,
+                CaPmtListManagement::Add,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        controller.remove_program(100).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &updated_first,
+                caid,
+                CaPmtListManagement::Update,
+                CaPmtCommand::NotSelected,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+        controller.remove_program(999).unwrap();
+        assert!(cam.recv().is_none());
+
+        // Desired programs belong to the controller, not the transient CA
+        // session. Reopening the resource restores the remaining program.
+        cam.send_spdu(0, &[0x95, 0x02, (ca_session >> 8) as u8, ca_session as u8]);
+        let _ = drain(&mut controller);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(
+                0,
+                TpduTag::DATA_LAST,
+                &spdu::build_close_session_response(spdu::SS_OK, ca_session),
+            )
+            .unwrap()
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        let restored_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, restored_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                restored_session,
+                &second,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
     }
 
     #[test]

@@ -13,5 +13,6 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2"
+libmpegts = "0.3.8"
 nix = { version = "0.31", features = ["ioctl"] }
 thiserror = "2"

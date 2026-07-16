@@ -15,8 +15,8 @@ Supports three types of delivery systems:
 DVB-CI (EN 50221) support currently includes a runtime-neutral
 `CiController`, the link, transport and session layers, and Resource
 Manager, Application Information, Conditional Access Support, Host
-Control, Date-Time and high-level MMI resources. CA PMT is not implemented
-yet.
+Control, Date-Time and high-level MMI resources, including CA PMT program
+selection from raw MPEG-TS PMT sections.
 
 ## FeDevice
 
@@ -184,6 +184,14 @@ while let Some(event) = ci.poll_event()? {
         event => println!("CI: {event:?}"),
     }
 }
+
+// A complete raw PMT section, including CRC32. The controller copies all
+// data it needs, so the input buffer may be reused after this call.
+let raw_pmt: &[u8] = get_raw_pmt_section();
+let program_number = ci.set_program(raw_pmt)?;
+
+// Later, withdraw the service by its PMT program_number.
+ci.remove_program(program_number)?;
 
 # Ok::<(), libdvb::error::Error>(())
 ```

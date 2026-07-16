@@ -24,6 +24,7 @@ use std::{
 use super::{
     apdu,
     apdu::ApduTag,
+    capmt::Program,
     controller::{
         CaSlotFailure,
         CaSlotStatus,
@@ -371,6 +372,18 @@ impl CiSession {
         self.resources
             .conditional_access
             .session_caids(slot_id, session_id)
+    }
+
+    pub(super) fn set_program(&mut self, program: Program) -> Result<Vec<u8>> {
+        self.resources
+            .conditional_access
+            .set_program(&mut self.transport, program)
+    }
+
+    pub(super) fn remove_program(&mut self, program_number: u16) -> Result<Vec<u8>> {
+        self.resources
+            .conditional_access
+            .remove_program(&mut self.transport, program_number)
     }
 
     pub(crate) fn has_ca_info(&self, slot_id: u8) -> bool {

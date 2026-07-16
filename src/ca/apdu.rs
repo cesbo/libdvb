@@ -29,6 +29,9 @@ impl ApduTag {
     pub const ENTER_MENU: Self = Self(0x9F8022);
     pub const CA_INFO_ENQ: Self = Self(0x9F8030);
     pub const CA_INFO: Self = Self(0x9F8031);
+    pub const CA_PMT: Self = Self(0x9F8032);
+    pub const CA_PMT_REPLY: Self = Self(0x9F8033);
+    pub const CA_UPDATE: Self = Self(0x9F8034);
     pub const TUNE: Self = Self(0x9F8400);
     pub const REPLACE: Self = Self(0x9F8401);
     pub const CLEAR_REPLACE: Self = Self(0x9F8402);
@@ -70,6 +73,9 @@ impl fmt::Debug for ApduTag {
             Self::ENTER_MENU => "ENTER_MENU",
             Self::CA_INFO_ENQ => "CA_INFO_ENQ",
             Self::CA_INFO => "CA_INFO",
+            Self::CA_PMT => "CA_PMT",
+            Self::CA_PMT_REPLY => "CA_PMT_REPLY",
+            Self::CA_UPDATE => "CA_UPDATE",
             Self::TUNE => "TUNE",
             Self::REPLACE => "REPLACE",
             Self::CLEAR_REPLACE => "CLEAR_REPLACE",

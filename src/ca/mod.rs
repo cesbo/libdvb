@@ -5,19 +5,20 @@
 //!
 //! - [`CaDevice`] - the kernel CA device (/dev/dvb/adapterN/caN), raw link-layer frames via
 //!   read(2)/write(2)
-//! - [`CiTransport`] - en50221 7.1 transport layer: command-response TPDU
-//!   framing, per-slot queues, fragmentation and reassembly
-//! - [`CiSession`] - en50221 7.2 session layer: sessions between module
-//!   applications and host resources, activity reported as [`CaEvent`]
-//! - [`CiController`] - non-blocking slot lifecycle, reset, transport
-//!   creation, polling, RCV and timeout recovery
+//! - [`CiTransport`] - en50221 7.1 transport layer: command-response TPDU framing, per-slot queues,
+//!   fragmentation and reassembly
+//! - [`CiSession`] - en50221 7.2 session layer: sessions between module applications and host
+//!   resources, activity reported as [`CaEvent`]
+//! - [`CiController`] - non-blocking slot lifecycle, reset, transport creation, polling, RCV and
+//!   timeout recovery
 //!
 //! Host-side resources (en50221 8): Resource Manager, Application
-//! Information, Conditional Access Support (`CA_INFO`), Host Control,
-//! Date-Time and MMI. CA PMT is not implemented yet.
+//! Information, Conditional Access Support (`CA_INFO` and `CA_PMT`), Host
+//! Control, Date-Time and MMI.
 
 mod apdu;
 mod asn1;
+mod capmt;
 mod controller;
 mod resource;
 mod session;
