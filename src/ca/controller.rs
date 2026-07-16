@@ -360,6 +360,13 @@ impl CiController {
         self.finish_slot_command(slot_id, result)
     }
 
+    /// Finishes viewing a list on the MMI session with menu_answ choice_ref 0
+    pub fn mmi_list_close(&mut self, slot_id: u8, session_id: u16) -> Result<()> {
+        self.require_active(slot_id)?;
+        let result = self.session.mmi_list_close(slot_id, session_id);
+        self.finish_slot_command(slot_id, result)
+    }
+
     /// Answers an enquiry on the MMI session; `None` cancels it
     pub fn mmi_answer(
         &mut self,

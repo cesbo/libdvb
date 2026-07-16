@@ -132,7 +132,8 @@ pub enum CaEvent {
         session_id: u16,
         menu: MmiMenu,
     },
-    /// list_last: a list to display; unlike a menu it needs no answer
+    /// list_last: a list to display; when the user finishes viewing it,
+    /// acknowledge it with [`CiSession::mmi_list_close`]
     MmiList {
         slot_id: u8,
         session_id: u16,
@@ -450,6 +451,12 @@ impl CiSession {
         self.require_session(slot_id, session_id, ResourceId::MMI)?;
         self.transport
             .send_apdu(slot_id, session_id, ApduTag::MENU_ANSW, &[choice])
+    }
+
+    /// Finishes viewing a [`CaEvent::MmiList`] by sending menu_answ with
+    /// choice_ref 0 on the exact MMI session
+    pub fn mmi_list_close(&mut self, slot_id: u8, session_id: u16) -> Result<()> {
+        self.mmi_menu_answer(slot_id, session_id, 0)
     }
 
     /// Answers a [`CaEvent::MmiEnq`] enquiry on the exact MMI session;
@@ -1655,6 +1662,12 @@ mod tests {
                     items: vec![b"Info".to_vec(), b"Exit".to_vec()],
                 },
             }]
+        );
+
+        session.mmi_list_close(0, session_id).unwrap();
+        assert_eq!(
+            pump(&mut session, &mut cam),
+            vec![vec![0x90, 0x02, 0x00, 0x01, 0x9F, 0x88, 0x0B, 0x01, 0x00]]
         );
     }
 
