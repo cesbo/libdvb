@@ -615,6 +615,29 @@ impl FeDevice {
         Ok(tune.frontend_frequency_khz)
     }
 
+    /// Sets up a simple LNB without DiSEqC switching.
+    ///
+    /// `frequency_mhz` is the transponder frequency, `lof_mhz` is the LNB
+    /// local oscillator frequency, and `tone` selects the LNB band via the
+    /// 22 kHz tone. Returns the intermediate frequency in kHz
+    /// (`frequency_mhz - lof_mhz`) to use in the adapter tune request.
+    pub fn use_lnb(&self, frequency_mhz: u32, lof_mhz: u32, tone: SecTone) -> Result<u32> {
+        let frequency_khz = frequency_mhz
+            .checked_sub(lof_mhz)
+            .and_then(|v| v.checked_mul(1000))
+            .ok_or_else(|| {
+                Error::InvalidData(format!(
+                    "transponder frequency {} MHz is below the LNB oscillator frequency {} MHz",
+                    frequency_mhz,
+                    lof_mhz
+                ))
+            })?;
+
+        self.set_tone(tone)?;
+
+        Ok(frequency_khz)
+    }
+
     /// Returns the current API version
     pub fn api_version(&self) -> ApiVersion {
         self.api_version
