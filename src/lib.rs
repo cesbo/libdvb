@@ -35,6 +35,8 @@ pub use fe::{
     FeDevice,
     FeStatus,
     IsdbTTune,
+    Mis,
+    PlsMode,
     SecCommand,
     ToneburstConfig,
     TuneRequest,

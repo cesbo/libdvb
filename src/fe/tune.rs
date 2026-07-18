@@ -50,6 +50,58 @@ impl Default for DvbSTune {
     }
 }
 
+/// PLS (Physical Layer Signalling) mode for DVB-S2 multistream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlsMode {
+    /// Root PLS code, converted to the Gold scrambling sequence index
+    #[default]
+    Root,
+    /// Gold PLS code, used as the scrambling sequence index as-is
+    Gold,
+    /// Combo PLS code, used as the scrambling sequence index as-is
+    Combo,
+}
+
+/// DVB-S2 multistream (MIS) / PLS parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mis {
+    /// PLS mode
+    pub mode: PlsMode,
+    /// PLS code
+    pub code: u32,
+    /// Input stream identifier (`DTV_STREAM_ID`)
+    pub stream_id: u32,
+}
+
+impl Mis {
+    /// PLS scrambling sequence index (`DTV_SCRAMBLING_SEQUENCE_INDEX`)
+    /// derived from the PLS mode and code.
+    ///
+    /// For [`PlsMode::Root`] the code is converted to the Gold scrambling
+    /// sequence index (EN 302 307, 5.5.4); for [`PlsMode::Gold`] and
+    /// [`PlsMode::Combo`] the code itself is the index.
+    pub fn pls_code(&self) -> u32 {
+        /// Scrambling sequences are 18-bit Gold sequences
+        const PLS_CODE_MASK: u32 = 0x3FFFF;
+
+        let code = self.code & PLS_CODE_MASK;
+
+        if self.mode != PlsMode::Root {
+            return code;
+        }
+
+        let mut x: u32 = 1;
+        for g in 0 .. PLS_CODE_MASK {
+            if code == x {
+                return g;
+            }
+            x = (((x ^ (x >> 7)) & 1) << 17) | (x >> 1);
+        }
+
+        PLS_CODE_MASK
+    }
+}
+
 /// DVB-S2 tune parameters. See [`DvbSTune`] for the frequency semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DvbS2Tune {
@@ -71,8 +123,10 @@ pub struct DvbS2Tune {
     pub pilot: Pilot,
     /// Roll-off factor
     pub rolloff: Rolloff,
-    /// Multistream / PLP stream identifier (`DTV_STREAM_ID`)
-    pub stream_id: Option<u32>,
+    /// Multistream / PLS parameters (`DTV_STREAM_ID` is always set when
+    /// present, `DTV_SCRAMBLING_SEQUENCE_INDEX` only when the driver
+    /// supports it)
+    pub mis: Option<Mis>,
 }
 
 impl Default for DvbS2Tune {
@@ -87,7 +141,7 @@ impl Default for DvbS2Tune {
             inversion: Inversion::Auto,
             pilot: Pilot::Auto,
             rolloff: Rolloff::R35,
-            stream_id: None,
+            mis: None,
         }
     }
 }
@@ -320,8 +374,9 @@ impl TuneRequest {
                     DtvProperty::Pilot(tune.pilot),
                     DtvProperty::Rolloff(tune.rolloff),
                 ]);
-                if let Some(stream_id) = tune.stream_id {
-                    cmdseq.push(DtvProperty::StreamId(stream_id));
+                if let Some(mis) = &tune.mis {
+                    cmdseq.push(DtvProperty::StreamId(mis.stream_id));
+                    cmdseq.push(DtvProperty::ScramblingSequenceIndex(mis.pls_code()));
                 }
             }
             TuneRequest::DvbC(tune) => {
@@ -430,7 +485,11 @@ mod tests {
             fec: Fec::Fec3_4,
             rolloff: Rolloff::R20,
             pilot: Pilot::Auto,
-            stream_id: Some(7),
+            mis: Some(Mis {
+                mode: PlsMode::Gold,
+                code: 5,
+                stream_id: 7,
+            }),
             inversion: Inversion::Auto,
         });
 
@@ -449,13 +508,14 @@ mod tests {
                 DtvProperty::Pilot(Pilot::Auto),
                 DtvProperty::Rolloff(Rolloff::R20),
                 DtvProperty::StreamId(7),
+                DtvProperty::ScramblingSequenceIndex(5),
                 DtvProperty::Tune,
             ]
         );
     }
 
     #[test]
-    fn dvbs2_tune_without_stream_id() {
+    fn dvbs2_tune_without_mis() {
         let request = TuneRequest::DvbS2(DvbS2Tune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
@@ -464,11 +524,72 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(
-            !request
-                .properties()
-                .iter()
-                .any(|p| matches!(p, DtvProperty::StreamId(_)))
+        assert!(!request.properties().iter().any(|p| matches!(
+            p,
+            DtvProperty::StreamId(_) | DtvProperty::ScramblingSequenceIndex(_)
+        )));
+    }
+
+    #[test]
+    fn mis_pls_code() {
+        // Gold and Combo codes are used as-is
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Gold,
+                code: 42,
+                stream_id: 0,
+            }
+            .pls_code(),
+            42
+        );
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Combo,
+                code: 42,
+                stream_id: 0,
+            }
+            .pls_code(),
+            42
+        );
+
+        // Codes are masked to 18 bits
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Gold,
+                code: 0xFFFFF,
+                stream_id: 0,
+            }
+            .pls_code(),
+            0x3FFFF
+        );
+
+        // Root codes are converted to the Gold scrambling sequence index
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Root,
+                code: 0x00001,
+                stream_id: 0,
+            }
+            .pls_code(),
+            0
+        );
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Root,
+                code: 0x20000,
+                stream_id: 0,
+            }
+            .pls_code(),
+            1
+        );
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Root,
+                code: 0x10000,
+                stream_id: 0,
+            }
+            .pls_code(),
+            2
         );
     }
 

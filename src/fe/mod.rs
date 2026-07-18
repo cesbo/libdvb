@@ -45,6 +45,8 @@ pub use tune::{
     DvbT2Tune,
     DvbTTune,
     IsdbTTune,
+    Mis,
+    PlsMode,
     TuneRequest,
 };
 
@@ -80,6 +82,7 @@ pub enum DtvProperty {
     TransmissionMode(TransmitMode),
     Hierarchy(Hierarchy),
     StreamId(u32),
+    ScramblingSequenceIndex(u32),
     Tune,
     Clear,
 }
@@ -107,6 +110,9 @@ impl DtvProperty {
             }
             DtvProperty::Hierarchy(v) => DtvPropertyRaw::new(DTV_HIERARCHY, v as u32),
             DtvProperty::StreamId(v) => DtvPropertyRaw::new(DTV_STREAM_ID, v),
+            DtvProperty::ScramblingSequenceIndex(v) => {
+                DtvPropertyRaw::new(DTV_SCRAMBLING_SEQUENCE_INDEX, v)
+            }
             DtvProperty::Tune => DtvPropertyRaw::new(DTV_TUNE, 0),
             DtvProperty::Clear => DtvPropertyRaw::new(DTV_CLEAR, 0),
         }
@@ -338,7 +344,18 @@ impl FeDevice {
     pub fn set_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         self.check_properties(cmdseq)?;
 
-        let raw: Vec<DtvPropertyRaw> = cmdseq.iter().map(DtvProperty::to_raw).collect();
+        let mut raw: Vec<DtvPropertyRaw> = Vec::with_capacity(cmdseq.len());
+        for p in cmdseq {
+            // DTV_SCRAMBLING_SEQUENCE_INDEX requires DVB API 5.11 or later
+            const API_5_11: ApiVersion = ApiVersion {
+                major: 0x05,
+                minor: 0x0B,
+            };
+            if matches!(p, DtvProperty::ScramblingSequenceIndex(_)) && self.api_version < API_5_11 {
+                continue;
+            }
+            raw.push(p.to_raw());
+        }
 
         let cmd = DtvProperties {
             num: raw.len() as u32,
