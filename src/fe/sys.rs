@@ -125,35 +125,30 @@ pub struct FeInfo {
 }
 
 impl Default for FeInfo {
-    #[inline]
     fn default() -> Self {
         unsafe { mem::zeroed::<Self>() }
     }
 }
 
 impl FeInfo {
-    #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut FeInfo {
         self as *mut _
     }
 }
 
-/// DiSEqC master command
-/// Check out the DiSEqC bus spec available on http://www.eutelsat.org/ for
+/// DiSEqC master command. Check out the DiSEqC bus spec available on http://www.eutelsat.org/ for
 /// the possible messages that can be used.
 #[repr(C)]
 #[derive(Debug)]
 pub struct DiseqcMasterCmd {
-    /// DiSEqC message to be sent. It contains a 3 bytes header with:
-    /// framing + address + command, and an optional argument
-    /// of up to 3 bytes of data.
+    /// DiSEqC message to be sent. It contains a 3 bytes header with: framing + address + command,
+    /// and an optional argument of up to 3 bytes of data.
     pub msg: [u8; 6],
     /// Length of the DiSEqC message. Valid values are 3 to 6.
     pub len: u8,
 }
 
 impl Default for DiseqcMasterCmd {
-    #[inline]
     fn default() -> Self {
         unsafe { mem::zeroed::<Self>() }
     }
@@ -164,19 +159,16 @@ impl Default for DiseqcMasterCmd {
 #[derive(Debug)]
 pub struct DiseqcSlaveReply {
     /// DiSEqC message buffer to store a message received via DiSEqC.
-    /// It contains one byte header with: framing and
-    /// an optional argument of up to 3 bytes of data.
+    /// It contains one byte header with: framing and an optional argument of up to 3 bytes of
+    /// data.
     pub msg: [u8; 4],
-    /// Length of the DiSEqC message. Valid values are 0 to 4,
-    /// where 0 means no message.
+    /// Length of the DiSEqC message. Valid values are 0 to 4, where 0 means no message.
     pub len: u8,
-    /// Return from ioctl after timeout ms with errorcode when
-    /// no message was received.
+    /// Return from ioctl after timeout ms with errorcode when no message was received.
     pub timeout: u32,
 }
 
 impl Default for DiseqcSlaveReply {
-    #[inline]
     fn default() -> Self {
         unsafe { mem::zeroed::<Self>() }
     }
@@ -190,7 +182,7 @@ bitflags! {
         const HAS_SIGNAL = 0x01;
         /// Has found a signal
         const HAS_CARRIER = 0x02;
-        /// FEC inner coding (Viterbi, LDPC or other inner code) is stable.
+        /// FEC inner coding (Viterbi, LDPC or other inner code) is stable
         const HAS_VITERBI = 0x04;
         /// Synchronization bytes was found
         const HAS_SYNC = 0x08;
@@ -214,9 +206,9 @@ impl FeStatusFlags {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecVoltage {
-    /// Output 13V to the LNB. Vertical linear. Right circular.
+    /// Output 13V to the LNB. Vertical linear. Right circular
     V13 = 0,
-    /// Output 18V to the LNB. Horizontal linear. Left circular.
+    /// Output 18V to the LNB. Horizontal linear. Left circular
     V18 = 1,
     /// Don't feed the LNB with a DC voltage
     Off = 2,
@@ -225,12 +217,27 @@ pub enum SecVoltage {
 impl TryFrom<u32> for SecVoltage {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(SecVoltage::V13),
             1 => Ok(SecVoltage::V18),
             2 => Ok(SecVoltage::Off),
+            _ => Err(Error::InvalidData(format!(
+                "invalid SecVoltage value: {}",
+                value
+            ))),
+        }
+    }
+}
+
+impl TryFrom<char> for SecVoltage {
+    type Error = Error;
+
+    fn try_from(value: char) -> Result<Self> {
+        match value.to_ascii_lowercase() {
+            'v' | 'r' => Ok(SecVoltage::V13),
+            'h' | 'l' => Ok(SecVoltage::V18),
+            '_' => Ok(SecVoltage::Off),
             _ => Err(Error::InvalidData(format!(
                 "invalid SecVoltage value: {}",
                 value
@@ -252,7 +259,6 @@ pub enum SecTone {
 impl TryFrom<u32> for SecTone {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(SecTone::On),
@@ -278,7 +284,6 @@ pub enum SecMiniCmd {
 impl TryFrom<u32> for SecMiniCmd {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(SecMiniCmd::A),
@@ -303,7 +308,6 @@ pub enum Inversion {
 impl TryFrom<u32> for Inversion {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(Inversion::Off),
@@ -329,7 +333,6 @@ pub enum Pilot {
 impl TryFrom<u32> for Pilot {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(Pilot::On),
@@ -365,7 +368,6 @@ pub enum Rolloff {
 impl TryFrom<u32> for Rolloff {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(Rolloff::R35),
@@ -403,7 +405,6 @@ pub enum GuardInterval {
 impl TryFrom<u32> for GuardInterval {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(GuardInterval::Gi1_32),
@@ -443,7 +444,6 @@ pub enum TransmitMode {
 impl TryFrom<u32> for TransmitMode {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(TransmitMode::Tm2K),
@@ -477,7 +477,6 @@ pub enum Hierarchy {
 impl TryFrom<u32> for Hierarchy {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(Hierarchy::None),
@@ -506,7 +505,6 @@ pub enum Interleaving {
 impl TryFrom<u32> for Interleaving {
     type Error = Error;
 
-    #[inline]
     fn try_from(value: u32) -> Result<Self> {
         match value {
             0 => Ok(Interleaving::None),
@@ -548,7 +546,6 @@ pub enum DeliverySystem {
 }
 
 impl DeliverySystem {
-    #[inline]
     pub fn as_u32(self) -> u32 {
         self as u32
     }
@@ -643,7 +640,6 @@ pub enum Modulation {
 }
 
 impl Modulation {
-    #[inline]
     pub fn as_u32(self) -> u32 {
         self as u32
     }
@@ -704,7 +700,6 @@ pub enum Fec {
 }
 
 impl Fec {
-    #[inline]
     pub fn as_u32(self) -> u32 {
         self as u32
     }
@@ -743,16 +738,13 @@ impl TryFrom<u32> for Fec {
 
 /// scale types for the quality parameters
 mod fecap_scale_params {
-    /// That QoS measure is not available. That could indicate
-    /// a temporary or a permanent condition.
+    /// That QoS measure is not available. That could indicate a temporary or a permanent condition.
     pub const FE_SCALE_NOT_AVAILABLE: u8 = 0;
     /// The scale is measured in 0.001 dB steps, typically used on signal measures.
     pub const FE_SCALE_DECIBEL: u8 = 1;
-    /// The scale is a relative percentual measure,
-    /// ranging from 0 (0%) to 0xffff (100%).
+    /// The scale is a relative percentual measure, ranging from 0 (0%) to 0xffff (100%).
     pub const FE_SCALE_RELATIVE: u8 = 2;
-    /// The scale counts the occurrence of an event, like
-    /// bit error, block error, lapsed time.
+    /// The scale counts the occurrence of an event, like bit error, block error, lapsed time.
     pub const FE_SCALE_COUNTER: u8 = 3;
 }
 
@@ -849,13 +841,13 @@ mod dtv_property_cmd {
     pub const DTV_ROLLOFF: u32 = 13;
     pub const DTV_DISEQC_SLAVE_REPLY: u32 = 14;
 
-    /* Basic enumeration set for querying unlimited capabilities */
+    // Basic enumeration set for querying unlimited capabilities
 
     pub const DTV_FE_CAPABILITY_COUNT: u32 = 15;
     pub const DTV_FE_CAPABILITY: u32 = 16;
     pub const DTV_DELIVERY_SYSTEM: u32 = 17;
 
-    /* ISDB-T and ISDB-Tsb */
+    // ISDB-T and ISDB-Tsb
 
     pub const DTV_ISDBT_PARTIAL_RECEPTION: u32 = 18;
     pub const DTV_ISDBT_SOUND_BROADCASTING: u32 = 19;
@@ -881,7 +873,7 @@ mod dtv_property_cmd {
 
     pub const DTV_API_VERSION: u32 = 35;
 
-    /* DVB-T/T2 */
+    // DVB-T/T2
 
     pub const DTV_CODE_RATE_HP: u32 = 36;
     pub const DTV_CODE_RATE_LP: u32 = 37;
@@ -896,7 +888,7 @@ mod dtv_property_cmd {
 
     pub const DTV_ENUM_DELSYS: u32 = 44;
 
-    /* ATSC-MH */
+    // ATSC-MH
 
     pub const DTV_ATSCMH_FIC_VER: u32 = 45;
     pub const DTV_ATSCMH_PARADE_ID: u32 = 46;
@@ -917,7 +909,7 @@ mod dtv_property_cmd {
     pub const DTV_INTERLEAVING: u32 = 60;
     pub const DTV_LNA: u32 = 61;
 
-    /* Quality parameters */
+    // Quality parameters
 
     pub const DTV_STAT_SIGNAL_STRENGTH: u32 = 62;
     pub const DTV_STAT_CNR: u32 = 63;
@@ -928,7 +920,7 @@ mod dtv_property_cmd {
     pub const DTV_STAT_ERROR_BLOCK_COUNT: u32 = 68;
     pub const DTV_STAT_TOTAL_BLOCK_COUNT: u32 = 69;
 
-    /* Physical layer scrambling */
+    // Physical layer scrambling
 
     pub const DTV_SCRAMBLING_SEQUENCE_INDEX: u32 = 70;
     pub const DTV_INPUT: u32 = 71;
@@ -1003,7 +995,7 @@ impl fmt::Debug for DtvPropertyRaw {
                 s.field(FIELD_DATA, &data);
             }
 
-            /* Quality parameters */
+            // Quality parameters
             DTV_STAT_SIGNAL_STRENGTH => {
                 s.field(FIELD_CMD, &"DTV_STAT_SIGNAL_STRENGTH");
                 s.field(FIELD_STATS, unsafe { &self.u.st });
@@ -1108,14 +1100,12 @@ pub struct FeEvent {
 }
 
 impl Default for FeEvent {
-    #[inline]
     fn default() -> Self {
         unsafe { mem::zeroed::<Self>() }
     }
 }
 
 impl FeEvent {
-    #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut FeEvent {
         self as *mut _
     }

@@ -20,44 +20,43 @@ selection from raw MPEG-TS PMT sections.
 
 ## FeDevice
 
-Frontend tune commands use typed DVBv5 properties instead of raw `u32`
-property/value pairs.
+Frontend tuning uses the high-level `TuneRequest` enum, which lowers
+per-delivery-system parameters to a DVBv5 property command sequence.
 
 Example DVB-S2 tune:
 
 ```rust
 use libdvb::{
-    DtvProperty,
+    DvbS2Tune,
     FeDevice,
+    TuneRequest,
     fe::sys::{
-        DeliverySystem,
-        Fec,
-        Inversion,
-        Modulation,
-        Pilot,
-        Rolloff,
         SecTone,
         SecVoltage,
     },
 };
 
-let cmdseq = vec![
-    DtvProperty::DeliverySystem(DeliverySystem::Dvbs2),
-    DtvProperty::Frequency((11044 - 9750) * 1000),
-    DtvProperty::Modulation(Modulation::Psk8),
-    DtvProperty::Voltage(SecVoltage::V13),
-    DtvProperty::Tone(SecTone::Off),
-    DtvProperty::Inversion(Inversion::Auto),
-    DtvProperty::SymbolRate(27500 * 1000),
-    DtvProperty::InnerFec(Fec::Auto),
-    DtvProperty::Pilot(Pilot::Auto),
-    DtvProperty::Rolloff(Rolloff::R35),
-    DtvProperty::Tune,
-];
-
 let fe = FeDevice::open_rw(0, 0)?;
-fe.set_properties(&cmdseq)?;
+
+// Optional: drive the SEC/DiSEqC switch and translate the transponder
+// frequency to the intermediate frequency (11044 MHz transponder,
+// 9750 MHz LNB local oscillator).
+let frequency_khz = fe.use_diseqc(11044, DiseqcConfig::Dsl("t v".to_owned()))?;
+
+let request = TuneRequest::DvbS2(DvbS2Tune {
+    frequency_khz,
+    symbolrate: 27500 * 1000,
+    voltage: SecVoltage::V13,
+    tone: SecTone::Off,
+    ..Default::default()
+});
+
+fe.tune(&request)?;
 ```
+
+The low-level interface is still available: `TuneRequest::properties()`
+builds the typed `Vec<DtvProperty>` command sequence, which can be applied
+with `FeDevice::set_properties()`.
 
 Frontend information is available through explicit accessors:
 

@@ -21,14 +21,23 @@ pub use ca::{
 pub use dvr::DvrDevice;
 pub use fe::{
     ApiVersion,
+    AtscTune,
     DiseqcConfig,
     DiseqcSwitchConfig,
     DiseqcTune,
     DtvProperty,
+    DvbCAnnex,
+    DvbCTune,
+    DvbS2Tune,
+    DvbSTune,
+    DvbT2Tune,
+    DvbTTune,
     FeDevice,
     FeStatus,
+    IsdbTTune,
     SecCommand,
     ToneburstConfig,
+    TuneRequest,
     UnicableConfig,
     diseqc_sequence,
 };

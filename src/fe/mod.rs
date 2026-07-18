@@ -1,6 +1,7 @@
 pub mod sec;
 mod status;
 pub mod sys;
+mod tune;
 
 use std::{
     ffi::CStr,
@@ -35,6 +36,17 @@ pub use sec::{
     diseqc_sequence,
 };
 pub use status::FeStatus;
+pub use tune::{
+    AtscTune,
+    DvbCAnnex,
+    DvbCTune,
+    DvbS2Tune,
+    DvbSTune,
+    DvbT2Tune,
+    DvbTTune,
+    IsdbTTune,
+    TuneRequest,
+};
 
 use self::sys::*;
 use crate::{
@@ -346,6 +358,17 @@ impl FeDevice {
         Ok(())
     }
 
+    /// Tunes the frontend using a high-level [`TuneRequest`].
+    ///
+    /// The request is lowered to a DVBv5 property command sequence and
+    /// applied with [`FeDevice::set_properties`].
+    /// For satellite systems the SEC/DiSEqC switch should be configured first with
+    /// [`FeDevice::use_diseqc`], which also translates the transponder frequency to the
+    /// intermediate frequency used by the request.
+    pub fn tune(&self, request: &TuneRequest) -> Result<()> {
+        self.set_properties(&request.properties())
+    }
+
     /// Gets properties from frontend device (raw read path)
     pub(crate) fn get_properties(&self, cmdseq: &mut [DtvPropertyRaw]) -> Result<()> {
         let mut cmd = DtvProperties {
@@ -508,8 +531,8 @@ impl FeDevice {
     /// - 18V:
     ///     - Horizontal in linear LNB
     ///     - Left in circular LNB
-    /// - OFF is needed with external power supply, for example
-    ///   to use same LNB with several receivers.
+    /// - OFF is needed with external power supply, for example to use same LNB with several
+    ///   receivers.
     pub fn set_voltage(&self, value: SecVoltage) -> Result<()> {
         // FE_SET_VOLTAGE
         nix::ioctl_write_int_bad!(
@@ -552,7 +575,6 @@ impl FeDevice {
     ///     - xx00 - switch input
     ///     - 00x0 - bit is set on SecVoltage::V18
     ///     - 000x - bit is set on SecTone::On
-    ///
     pub fn diseqc_master_cmd(&self, msg: &[u8]) -> Result<()> {
         if !(3 ..= 6).contains(&msg.len()) {
             return Err(Error::InvalidData(format!(
