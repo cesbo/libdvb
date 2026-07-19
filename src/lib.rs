@@ -4,6 +4,7 @@ pub mod dvr;
 pub mod error;
 pub mod fe;
 pub mod net;
+pub mod sec;
 
 mod fd;
 mod sysfs;
@@ -45,3 +46,4 @@ pub use fe::{
     diseqc_sequence,
 };
 pub use net::NetDevice;
+pub use sec::SecDevice;

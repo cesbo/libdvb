@@ -151,6 +151,22 @@ println!("Interface: {}", interface);
 println!("MAC: {}", interface.mac());
 ```
 
+## External CI (DigitalDevices / TBS)
+
+`SecDevice` opens the CI adapter TS pipe (`ciN` node on DigitalDevices,
+`secN` on TBS) in non-blocking mode. It is control plane only: the TS
+data path uses the exposed file descriptors.
+
+```rust
+use libdvb::SecDevice;
+
+let sec = SecDevice::open(1, 0)?;
+sec.set_ci_bitrate(70)?; // MBit/s; TBS only, no-op for other vendors
+
+let fd_in = sec.fd_in();   // write scrambled TS into the CAM
+let fd_out = sec.fd_out(); // read descrambled TS from the CAM
+```
+
 ## CI
 
 `CiController` manages multi-slot CAM insertion/removal, reset,
