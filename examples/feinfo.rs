@@ -1,7 +1,4 @@
-use libdvb::{
-    FeDevice,
-    FeStatus,
-};
+use libdvb::FeDevice;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -31,7 +28,6 @@ fn main() {
 
     println!("Frontend capabilities: {:?}", fe.caps());
 
-    let mut status = FeStatus::default();
-    status.read(&fe).unwrap();
-    println!("Status: {}", status.to_status_string());
+    let stats = fe.get_stats().unwrap();
+    println!("Status: {}", stats.to_status_string());
 }

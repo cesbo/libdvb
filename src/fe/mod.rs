@@ -1,5 +1,5 @@
 pub mod sec;
-mod status;
+mod stats;
 pub mod sys;
 mod tune;
 
@@ -35,7 +35,10 @@ pub use sec::{
     UnicableConfig,
     diseqc_sequence,
 };
-pub use status::FeStatus;
+pub use stats::{
+    FeLevel,
+    FeStats,
+};
 pub use tune::{
     AtscTune,
     DvbCAnnex,
@@ -429,6 +432,15 @@ impl FeDevice {
         unsafe { ioctl_call(self.as_raw_fd(), event as *mut _) }?;
 
         Ok(())
+    }
+
+    /// Returns a snapshot of the frontend statistics.
+    ///
+    /// Reads the status flags and all DVBv5 statistics properties at once,
+    /// with fallback to the DVBv3 API for BER/UNC, so all values in the
+    /// returned [`FeStats`] belong to the same point in time.
+    pub fn get_stats(&self) -> Result<FeStats> {
+        FeStats::read(self)
     }
 
     /// Returns frontend status flags

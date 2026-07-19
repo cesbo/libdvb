@@ -3,10 +3,7 @@ use std::{
     time::Duration,
 };
 
-use libdvb::{
-    FeDevice,
-    FeStatus,
-};
+use libdvb::FeDevice;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -22,12 +19,11 @@ fn main() {
     };
 
     let fe = FeDevice::open_ro(adapter, device).unwrap();
-    let mut status = FeStatus::default();
 
     let delay = Duration::from_secs(1);
     loop {
-        status.read(&fe).unwrap();
-        println!("{}", status.to_status_string());
+        let stats = fe.get_stats().unwrap();
+        println!("{}", stats.to_status_string());
         thread::sleep(delay);
     }
 }

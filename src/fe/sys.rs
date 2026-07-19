@@ -1058,20 +1058,6 @@ impl DtvPropertyRaw {
         let ptr = std::ptr::addr_of!(self.u).cast::<DtvFrontendStats>();
         unsafe { ptr.read_unaligned() }
     }
-
-    pub(crate) fn set_stats(&mut self, stats: DtvFrontendStats) {
-        let ptr = std::ptr::addr_of_mut!(self.u).cast::<DtvFrontendStats>();
-        unsafe { ptr.write_unaligned(stats) };
-    }
-
-    pub(crate) fn stat(&self, index: usize) -> Option<DtvStats> {
-        let stats = self.stats();
-        if index < usize::from(stats.len) {
-            Some(stats.stat[index])
-        } else {
-            None
-        }
-    }
 }
 
 pub const DTV_MAX_COMMAND: u32 = DTV_INPUT;
@@ -1108,5 +1094,104 @@ impl Default for FeEvent {
 impl FeEvent {
     pub fn as_mut_ptr(&mut self) -> *mut FeEvent {
         self as *mut _
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! ABI layout checks for the hand-ported kernel structs.
+    //!
+    //! Expected sizes and offsets are taken from the C struct definitions in the
+    //! Linux UAPI header `linux/dvb/frontend.h`. Pointer-sized fields are computed
+    //! from the target pointer width, so the checks hold on both 64-bit and
+    //! 32-bit targets.
+
+    use std::{
+        ffi::c_void,
+        mem::offset_of,
+    };
+
+    use super::*;
+
+    const PTR_SIZE: usize = size_of::<*mut c_void>();
+
+    /// struct dtv_property buffer member: __u8 data[32] + __u32 len + __u32 reserved1[3] + void
+    /// *reserved2
+    const DTV_PROPERTY_BUFFER_SIZE: usize = 32 + 4 + 12 + PTR_SIZE;
+
+    /// union with `data: u32`, `st` (37 bytes packed) and `buffer`; buffer dominates
+    const DTV_PROPERTY_DATA_SIZE: usize = DTV_PROPERTY_BUFFER_SIZE;
+
+    /// struct dtv_property is packed: __u32 cmd + __u32 reserved[3] + union + int result
+    const DTV_PROPERTY_SIZE: usize = 4 + 12 + DTV_PROPERTY_DATA_SIZE + 4;
+
+    #[test]
+    fn fe_info() {
+        // struct dvb_frontend_info
+        assert_eq!(size_of::<FeInfo>(), 168);
+        assert_eq!(offset_of!(FeInfo, fe_type), 128);
+        assert_eq!(offset_of!(FeInfo, frequency_min), 132);
+        assert_eq!(offset_of!(FeInfo, symbol_rate_min), 148);
+        assert_eq!(offset_of!(FeInfo, caps), 164);
+    }
+
+    #[test]
+    fn fe_diseqc() {
+        // struct dvb_diseqc_master_cmd
+        assert_eq!(size_of::<DiseqcMasterCmd>(), 7);
+        assert_eq!(offset_of!(DiseqcMasterCmd, len), 6);
+
+        // struct dvb_diseqc_slave_reply
+        assert_eq!(size_of::<DiseqcSlaveReply>(), 12);
+        assert_eq!(offset_of!(DiseqcSlaveReply, len), 4);
+        assert_eq!(offset_of!(DiseqcSlaveReply, timeout), 8);
+    }
+
+    #[test]
+    fn fe_stats() {
+        // struct dtv_stats (packed)
+        assert_eq!(size_of::<DtvStats>(), 9);
+        assert_eq!(align_of::<DtvStats>(), 1);
+        assert_eq!(offset_of!(DtvStats, value), 1);
+
+        // struct dtv_fe_stats (packed)
+        assert_eq!(size_of::<DtvFrontendStats>(), 37);
+        assert_eq!(align_of::<DtvFrontendStats>(), 1);
+        assert_eq!(offset_of!(DtvFrontendStats, stat), 1);
+    }
+
+    #[test]
+    fn fe_property() {
+        assert_eq!(size_of::<DtvPropertyBuffer>(), DTV_PROPERTY_BUFFER_SIZE);
+        assert_eq!(size_of::<DtvPropertyData>(), DTV_PROPERTY_DATA_SIZE);
+
+        // struct dtv_property (packed)
+        assert_eq!(size_of::<DtvPropertyRaw>(), DTV_PROPERTY_SIZE);
+        assert_eq!(align_of::<DtvPropertyRaw>(), 1);
+        assert_eq!(offset_of!(DtvPropertyRaw, cmd), 0);
+        assert_eq!(offset_of!(DtvPropertyRaw, u), 16);
+        assert_eq!(
+            offset_of!(DtvPropertyRaw, result),
+            16 + DTV_PROPERTY_DATA_SIZE
+        );
+    }
+
+    #[test]
+    fn fe_event() {
+        // struct dvb_frontend_parameters: frequency + inversion + 28-byte parameters union
+        assert_eq!(size_of::<FeParameters>(), 36);
+
+        // struct dvb_frontend_event
+        assert_eq!(size_of::<FeEvent>(), 40);
+        assert_eq!(offset_of!(FeEvent, parameters), 4);
+    }
+
+    #[test]
+    fn auto_traits() {
+        // The reserved pointer field was changed to `usize` so these stay Send + Sync.
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<DtvPropertyRaw>();
+        assert_send_sync::<crate::FeStats>();
+        assert_send_sync::<crate::FeDevice>();
     }
 }
