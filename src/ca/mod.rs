@@ -77,9 +77,12 @@ pub use self::{
         TransportRecv,
     },
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    sysfs,
 };
 
 /// CA device of the DVB adapter (/dev/dvb/adapterN/caN)
@@ -89,6 +92,9 @@ pub struct CaDevice {
     device: u32,
 
     file: File,
+
+    vendor_id: Option<u32>,
+    device_id: Option<u32>,
 }
 
 impl AsRawFd for CaDevice {
@@ -114,10 +120,15 @@ impl CaDevice {
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)?;
 
+        let vendor_id = sysfs::read_hex_attr(&file, "vendor");
+        let device_id = sysfs::read_hex_attr(&file, "device");
+
         Ok(CaDevice {
             adapter,
             device,
             file,
+            vendor_id,
+            device_id,
         })
     }
 
@@ -129,6 +140,16 @@ impl CaDevice {
     /// Returns the device number the device was opened with
     pub fn device(&self) -> u32 {
         self.device
+    }
+
+    /// PCI vendor ID of the CA device, if reported via sysfs.
+    pub fn vendor_id(&self) -> Option<u32> {
+        self.vendor_id
+    }
+
+    /// PCI device ID of the CA device, if reported via sysfs.
+    pub fn device_id(&self) -> Option<u32> {
+        self.device_id
     }
 
     /// Gets CA interface capabilities (CA_GET_CAP ioctl)
@@ -175,6 +196,8 @@ impl CaDevice {
             adapter: 0,
             device: 0,
             file,
+            vendor_id: None,
+            device_id: None,
         }
     }
 

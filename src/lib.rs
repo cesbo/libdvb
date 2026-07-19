@@ -6,6 +6,7 @@ pub mod fe;
 pub mod net;
 
 mod fd;
+mod sysfs;
 
 pub use ca::{
     CaDevice,

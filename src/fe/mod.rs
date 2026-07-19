@@ -60,6 +60,7 @@ use crate::{
         file_status_flags,
         set_file_status_flags,
     },
+    sysfs,
 };
 
 /// Typed DVBv5 property used to build a frontend command sequence.
@@ -151,6 +152,9 @@ pub struct FeDevice {
     frequency_range: Range<u32>,
     symbolrate_range: Range<u32>,
     caps: FeCaps,
+
+    vendor_id: Option<u32>,
+    device_id: Option<u32>,
 }
 
 impl AsRawFd for FeDevice {
@@ -264,9 +268,15 @@ impl FeDevice {
             frequency_range: 0 .. 0,
             symbolrate_range: 0 .. 0,
             caps: FeCaps::empty(),
+
+            vendor_id: None,
+            device_id: None,
         };
 
         fe.get_info()?;
+
+        fe.vendor_id = sysfs::read_hex_attr(&fe.file, "vendor");
+        fe.device_id = sysfs::read_hex_attr(&fe.file, "device");
 
         Ok(fe)
     }
@@ -645,8 +655,7 @@ impl FeDevice {
             .ok_or_else(|| {
                 Error::InvalidData(format!(
                     "transponder frequency {} MHz is below the LNB oscillator frequency {} MHz",
-                    frequency_mhz,
-                    lof_mhz
+                    frequency_mhz, lof_mhz
                 ))
             })?;
 
@@ -683,5 +692,15 @@ impl FeDevice {
     /// Frontend capability flags.
     pub fn caps(&self) -> FeCaps {
         self.caps
+    }
+
+    /// PCI vendor ID of the frontend device, if reported via sysfs.
+    pub fn vendor_id(&self) -> Option<u32> {
+        self.vendor_id
+    }
+
+    /// PCI device ID of the frontend device, if reported via sysfs.
+    pub fn device_id(&self) -> Option<u32> {
+        self.device_id
     }
 }
