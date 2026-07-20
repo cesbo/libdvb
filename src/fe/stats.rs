@@ -218,36 +218,30 @@ impl FeStats {
         result.modulation =
             Modulation::try_from(props[IDX_MODULATION].data()).unwrap_or(Modulation::Qpsk);
 
-        let stats = normalize_signal_strength(status, props[IDX_SIGNAL_STRENGTH].stats());
-        result.signal = level_from_stats(&stats);
+        result.signal = normalize_signal_strength(status, &props[IDX_SIGNAL_STRENGTH].stats());
 
-        let stats = normalize_snr(
+        result.cnr = normalize_snr(
             status,
             result.delivery_system,
             result.modulation,
-            props[IDX_SNR].stats(),
+            &props[IDX_SNR].stats(),
         );
-        result.cnr = level_from_stats(&stats);
 
-        let stats = normalize_ber(status, props[IDX_BER].stats(), fe);
-        result.ber = counter_from_stats(&stats);
-
-        let stats = normalize_unc(status, props[IDX_UNC].stats(), fe);
-        result.unc = counter_from_stats(&stats);
+        result.ber = normalize_ber(status, &props[IDX_BER].stats(), fe);
+        result.unc = normalize_unc(status, &props[IDX_UNC].stats(), fe);
 
         Ok(result)
     }
 }
 
-/// Builds an [`FeLevel`] from a normalized stats pair: decibel in `stat[0]`,
-/// relative in `stat[1]`.
-fn level_from_stats(stats: &DtvFrontendStats) -> FeLevel {
+fn normalize_signal_strength(status: FeStatusFlags, stats: &DtvFrontendStats) -> FeLevel {
     let mut level = FeLevel::default();
+    let mut decibel = None;
 
     for i in 0 .. usize::from(stats.len).min(stats.stat.len()) {
         let stat = stats.stat[i];
         match stat.scale {
-            FE_SCALE_DECIBEL => level.decibel = Some((stat.value as f64) / 1000.0),
+            FE_SCALE_DECIBEL => decibel = Some(stat.value),
             FE_SCALE_RELATIVE => {
                 level.relative = Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
             }
@@ -255,157 +249,117 @@ fn level_from_stats(stats: &DtvFrontendStats) -> FeLevel {
         }
     }
 
-    level
-}
+    if let Some(value) = decibel {
+        level.decibel = Some((value as f64) / 1000.0);
 
-/// Extracts a counter value from normalized stats, `None` if not available.
-fn counter_from_stats(stats: &DtvFrontendStats) -> Option<u32> {
-    if stats.len == 0 || stats.stat[0].scale != FE_SCALE_COUNTER {
-        return None;
-    }
+        // Calculates relative signal strength value
+        if level.relative.is_none() && status.contains(FeStatusFlags::HAS_SIGNAL) {
+            // TODO: check delivery_system
 
-    Some((stats.stat[0].value & 0xFFFF_FFFF) as u32)
-}
+            const LO: i64 = -85000;
+            const HI: i64 = -6000;
 
-fn normalize_signal_strength(
-    status: FeStatusFlags,
-    mut stats: DtvFrontendStats,
-) -> DtvFrontendStats {
-    for i in usize::from(stats.len) .. 2 {
-        stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
-        stats.stat[i].value = 0;
-    }
+            let value = if value > HI {
+                65535
+            } else if value < LO {
+                0
+            } else {
+                65535 * (LO - value) / (LO - HI)
+            };
 
-    stats.len = 2;
-
-    if stats.stat[0].scale == FE_SCALE_RELATIVE {
-        stats.stat.swap(0, 1);
-        return stats;
-    }
-
-    if stats.stat[1].scale == FE_SCALE_RELATIVE || !status.contains(FeStatusFlags::HAS_SIGNAL) {
-        return stats;
-    }
-
-    // Calculates relative signal strength value
-    if stats.stat[0].scale != FE_SCALE_DECIBEL {
-        return stats;
-    }
-
-    // TODO: check delivery_system
-
-    let lo: i64 = -85000;
-    let hi: i64 = -6000;
-
-    stats.stat[1].scale = FE_SCALE_RELATIVE;
-    stats.stat[1].value = {
-        if stats.stat[0].value > hi {
-            65535
-        } else if stats.stat[0].value < lo {
-            0
-        } else {
-            65535 * (lo - stats.stat[0].value) / (lo - hi)
+            level.relative = Some((value * 100 / 65535) as u32);
         }
-    };
+    }
 
-    stats
+    level
 }
 
 fn normalize_snr(
     status: FeStatusFlags,
     delivery_system: DeliverySystem,
     modulation: Modulation,
-    mut stats: DtvFrontendStats,
-) -> DtvFrontendStats {
-    for i in usize::from(stats.len) .. 2 {
-        stats.stat[i].scale = FE_SCALE_NOT_AVAILABLE;
-        stats.stat[i].value = 0;
-    }
+    stats: &DtvFrontendStats,
+) -> FeLevel {
+    let mut level = FeLevel::default();
+    let mut decibel = None;
 
-    stats.len = 2;
-
-    if stats.stat[0].scale == FE_SCALE_RELATIVE {
-        stats.stat.swap(0, 1);
-        return stats;
-    }
-
-    if stats.stat[1].scale == FE_SCALE_RELATIVE || !status.contains(FeStatusFlags::HAS_CARRIER) {
-        return stats;
-    }
-
-    // Calculates relative SNR value
-    if stats.stat[0].scale != FE_SCALE_DECIBEL {
-        return stats;
-    }
-
-    let hi = match delivery_system {
-        DeliverySystem::Dvbs | DeliverySystem::Dvbs2 => 15000,
-
-        DeliverySystem::DvbcAnnexA
-        | DeliverySystem::DvbcAnnexB
-        | DeliverySystem::DvbcAnnexC
-        | DeliverySystem::Dvbc2 => 28000,
-
-        DeliverySystem::Dvbt | DeliverySystem::Dvbt2 => 19000,
-
-        DeliverySystem::Atsc => match modulation {
-            Modulation::Vsb8 | Modulation::Vsb16 => 19000,
-            _ => 28000,
-        },
-
-        _ => return stats,
-    };
-
-    stats.stat[1].scale = FE_SCALE_RELATIVE;
-    stats.stat[1].value = {
-        if stats.stat[0].value >= hi {
-            65535
-        } else if stats.stat[0].value <= 0 {
-            0
-        } else {
-            65535 * stats.stat[0].value / hi
+    for i in 0 .. usize::from(stats.len).min(stats.stat.len()) {
+        let stat = stats.stat[i];
+        match stat.scale {
+            FE_SCALE_DECIBEL => decibel = Some(stat.value),
+            FE_SCALE_RELATIVE => {
+                level.relative = Some(((stat.value & 0xFFFF) * 100 / 65535) as u32)
+            }
+            _ => {}
         }
-    };
+    }
 
-    stats
+    if let Some(value) = decibel {
+        level.decibel = Some((value as f64) / 1000.0);
+
+        // Calculates relative SNR value
+        if level.relative.is_none() && status.contains(FeStatusFlags::HAS_CARRIER) {
+            let hi = match delivery_system {
+                DeliverySystem::Dvbs | DeliverySystem::Dvbs2 => 15000,
+
+                DeliverySystem::DvbcAnnexA
+                | DeliverySystem::DvbcAnnexB
+                | DeliverySystem::DvbcAnnexC
+                | DeliverySystem::Dvbc2 => 28000,
+
+                DeliverySystem::Dvbt | DeliverySystem::Dvbt2 => 19000,
+
+                DeliverySystem::Atsc => match modulation {
+                    Modulation::Vsb8 | Modulation::Vsb16 => 19000,
+                    _ => 28000,
+                },
+
+                _ => return level,
+            };
+
+            let value = if value >= hi {
+                65535
+            } else if value <= 0 {
+                0
+            } else {
+                65535 * value / hi
+            };
+
+            level.relative = Some((value * 100 / 65535) as u32);
+        }
+    }
+
+    level
 }
 
 /// Normalize BER value
-fn normalize_ber(
-    status: FeStatusFlags,
-    mut stats: DtvFrontendStats,
-    fe: &FeDevice,
-) -> DtvFrontendStats {
-    if stats.len == 0 {
-        stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
-        stats.stat[0].value = 0;
-        stats.len = 1;
+fn normalize_ber(status: FeStatusFlags, stats: &DtvFrontendStats, fe: &FeDevice) -> Option<u32> {
+    for i in 0 .. usize::from(stats.len).min(stats.stat.len()) {
+        let stat = stats.stat[i];
+        if stat.scale == FE_SCALE_COUNTER {
+            return Some((stat.value & 0xFFFF_FFFF) as u32);
+        }
     }
 
-    if stats.stat[0].scale != FE_SCALE_COUNTER && status.contains(FeStatusFlags::HAS_LOCK) {
-        stats.stat[0].scale = FE_SCALE_COUNTER;
-        stats.stat[0].value = fe.read_ber().map(i64::from).unwrap_or(-1);
+    if status.contains(FeStatusFlags::HAS_LOCK) {
+        return fe.read_ber().ok();
     }
 
-    stats
+    None
 }
 
 /// Normalize UNC value
-fn normalize_unc(
-    status: FeStatusFlags,
-    mut stats: DtvFrontendStats,
-    fe: &FeDevice,
-) -> DtvFrontendStats {
-    if stats.len == 0 {
-        stats.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
-        stats.stat[0].value = 0;
-        stats.len = 1;
+fn normalize_unc(status: FeStatusFlags, stats: &DtvFrontendStats, fe: &FeDevice) -> Option<u32> {
+    for i in 0 .. usize::from(stats.len).min(stats.stat.len()) {
+        let stat = stats.stat[i];
+        if stat.scale == FE_SCALE_COUNTER {
+            return Some((stat.value & 0xFFFF_FFFF) as u32);
+        }
     }
 
-    if stats.stat[0].scale != FE_SCALE_COUNTER && status.contains(FeStatusFlags::HAS_LOCK) {
-        stats.stat[0].scale = FE_SCALE_COUNTER;
-        stats.stat[0].value = fe.read_unc().map(i64::from).unwrap_or(-1);
+    if status.contains(FeStatusFlags::HAS_LOCK) {
+        return fe.read_unc().ok();
     }
 
-    stats
+    None
 }
