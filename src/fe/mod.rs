@@ -437,8 +437,8 @@ impl FeDevice {
     /// Returns a snapshot of the frontend statistics.
     ///
     /// Reads the status flags and all DVBv5 statistics properties at once,
-    /// with fallback to the DVBv3 API for BER/UNC, so all values in the
-    /// returned [`FeStats`] belong to the same point in time.
+    /// with fallback to the DVBv3 API for signal strength/SNR/BER/UNC, so
+    /// all values in the returned [`FeStats`] belong to the same point in time.
     pub fn get_stats(&self) -> Result<FeStats> {
         FeStats::read(self)
     }

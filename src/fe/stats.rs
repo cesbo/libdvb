@@ -218,13 +218,14 @@ impl FeStats {
         result.modulation =
             Modulation::try_from(props[IDX_MODULATION].data()).unwrap_or(Modulation::Qpsk);
 
-        result.signal = normalize_signal_strength(status, &props[IDX_SIGNAL_STRENGTH].stats());
+        result.signal = normalize_signal_strength(status, &props[IDX_SIGNAL_STRENGTH].stats(), fe);
 
         result.cnr = normalize_snr(
             status,
             result.delivery_system,
             result.modulation,
             &props[IDX_SNR].stats(),
+            fe,
         );
 
         result.ber = normalize_ber(status, &props[IDX_BER].stats(), fe);
@@ -234,7 +235,11 @@ impl FeStats {
     }
 }
 
-fn normalize_signal_strength(status: FeStatusFlags, stats: &DtvFrontendStats) -> FeLevel {
+fn normalize_signal_strength(
+    status: FeStatusFlags,
+    stats: &DtvFrontendStats,
+    fe: &FeDevice,
+) -> FeLevel {
     let mut level = FeLevel::default();
     let mut decibel = None;
 
@@ -271,6 +276,13 @@ fn normalize_signal_strength(status: FeStatusFlags, stats: &DtvFrontendStats) ->
         }
     }
 
+    if level.relative.is_none()
+        && status.contains(FeStatusFlags::HAS_SIGNAL)
+        && let Ok(value) = fe.read_signal_strength()
+    {
+        level.relative = Some(u32::from(value) * 100 / 65535);
+    }
+
     level
 }
 
@@ -279,6 +291,7 @@ fn normalize_snr(
     delivery_system: DeliverySystem,
     modulation: Modulation,
     stats: &DtvFrontendStats,
+    fe: &FeDevice,
 ) -> FeLevel {
     let mut level = FeLevel::default();
     let mut decibel = None;
@@ -327,6 +340,13 @@ fn normalize_snr(
 
             level.relative = Some((value * 100 / 65535) as u32);
         }
+    }
+
+    if level.relative.is_none()
+        && status.contains(FeStatusFlags::HAS_CARRIER)
+        && let Ok(value) = fe.read_snr()
+    {
+        level.relative = Some(u32::from(value) * 100 / 65535);
     }
 
     level
