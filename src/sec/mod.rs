@@ -13,6 +13,7 @@ use std::{
         File,
         OpenOptions,
     },
+    io,
     os::{
         fd::{
             AsFd,
@@ -30,10 +31,7 @@ use std::{
 };
 
 use crate::{
-    error::{
-        Error,
-        Result,
-    },
+    error::Result,
     fe::sys::DtvPropertyRaw,
 };
 
@@ -78,29 +76,24 @@ impl SecDevice {
         let ci_path = format!("/dev/dvb/adapter{}/ci{}", adapter, device);
         let sec_path = format!("/dev/dvb/adapter{}/sec{}", adapter, device);
 
-        let mut opened = None;
-        for path in [&ci_path, &sec_path] {
-            if let Ok(file) = OpenOptions::new()
+        let try_open = |path: &str| -> io::Result<(File, File)> {
+            let fd_in = OpenOptions::new()
                 .write(true)
                 .custom_flags(::nix::libc::O_NONBLOCK)
-                .open(path)
-            {
-                opened = Some((path, file));
-                break;
-            }
-        }
+                .open(path)?;
 
-        let Some((path, fd_in)) = opened else {
-            return Err(Error::InvalidProperty(format!(
-                "ci device is not found: {} or {}",
-                ci_path, sec_path
-            )));
+            let fd_out = OpenOptions::new()
+                .read(true)
+                .custom_flags(::nix::libc::O_NONBLOCK)
+                .open(path)?;
+
+            Ok((fd_in, fd_out))
         };
 
-        let fd_out = OpenOptions::new()
-            .read(true)
-            .custom_flags(::nix::libc::O_NONBLOCK)
-            .open(path)?;
+        let (fd_in, fd_out) = match try_open(&ci_path) {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => try_open(&sec_path)?,
+            result => result?,
+        };
 
         let vendor_id = crate::sysfs::read_hex_attr(&fd_out, "vendor");
         let device_id = crate::sysfs::read_hex_attr(&fd_out, "device");
