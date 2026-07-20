@@ -80,25 +80,33 @@ impl Mis {
     /// For [`PlsMode::Root`] the code is converted to the Gold scrambling
     /// sequence index (EN 302 307, 5.5.4); for [`PlsMode::Gold`] and
     /// [`PlsMode::Combo`] the code itself is the index.
-    pub fn pls_code(&self) -> u32 {
+    ///
+    /// Returns `None` for the default [`PlsMode::Root`] code 0, which uses
+    /// the default scrambling sequence and does not need to be set.
+    pub fn pls_code(&self) -> Option<u32> {
         /// Scrambling sequences are 18-bit Gold sequences
         const PLS_CODE_MASK: u32 = 0x3FFFF;
 
         let code = self.code & PLS_CODE_MASK;
 
         if self.mode != PlsMode::Root {
-            return code;
+            return Some(code);
+        }
+
+        // Invalid code value for PLS Root
+        if code == 0 {
+            return None;
         }
 
         let mut x: u32 = 1;
         for g in 0 .. PLS_CODE_MASK {
             if code == x {
-                return g;
+                return Some(g);
             }
             x = (((x ^ (x >> 7)) & 1) << 17) | (x >> 1);
         }
 
-        PLS_CODE_MASK
+        Some(PLS_CODE_MASK)
     }
 }
 
@@ -376,7 +384,9 @@ impl TuneRequest {
                 ]);
                 if let Some(mis) = &tune.mis {
                     cmdseq.push(DtvProperty::StreamId(mis.stream_id));
-                    cmdseq.push(DtvProperty::ScramblingSequenceIndex(mis.pls_code()));
+                    if let Some(pls_code) = mis.pls_code() {
+                        cmdseq.push(DtvProperty::ScramblingSequenceIndex(pls_code));
+                    }
                 }
             }
             TuneRequest::DvbC(tune) => {
@@ -515,6 +525,34 @@ mod tests {
     }
 
     #[test]
+    fn dvbs2_tune_mis_root_default() {
+        let request = TuneRequest::DvbS2(DvbS2Tune {
+            frequency_khz: 1_294_000,
+            symbolrate: 27_500_000,
+            voltage: SecVoltage::V13,
+            tone: SecTone::Off,
+            mis: Some(Mis {
+                mode: PlsMode::Root,
+                code: 0,
+                stream_id: 7,
+            }),
+            ..Default::default()
+        });
+
+        let properties = request.properties();
+        assert!(
+            properties
+                .iter()
+                .any(|p| matches!(p, DtvProperty::StreamId(7)))
+        );
+        assert!(
+            !properties
+                .iter()
+                .any(|p| matches!(p, DtvProperty::ScramblingSequenceIndex(_)))
+        );
+    }
+
+    #[test]
     fn dvbs2_tune_without_mis() {
         let request = TuneRequest::DvbS2(DvbS2Tune {
             frequency_khz: 1_294_000,
@@ -532,6 +570,17 @@ mod tests {
 
     #[test]
     fn mis_pls_code() {
+        // Default Root code 0 uses the default scrambling sequence
+        assert_eq!(
+            Mis {
+                mode: PlsMode::Root,
+                code: 0,
+                stream_id: 0,
+            }
+            .pls_code(),
+            None
+        );
+
         // Gold and Combo codes are used as-is
         assert_eq!(
             Mis {
@@ -540,7 +589,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            42
+            Some(42)
         );
         assert_eq!(
             Mis {
@@ -549,7 +598,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            42
+            Some(42)
         );
 
         // Codes are masked to 18 bits
@@ -560,7 +609,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            0x3FFFF
+            Some(0x3FFFF)
         );
 
         // Root codes are converted to the Gold scrambling sequence index
@@ -571,7 +620,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            0
+            Some(0)
         );
         assert_eq!(
             Mis {
@@ -580,7 +629,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            1
+            Some(1)
         );
         assert_eq!(
             Mis {
@@ -589,7 +638,7 @@ mod tests {
                 stream_id: 0,
             }
             .pls_code(),
-            2
+            Some(2)
         );
     }
 
