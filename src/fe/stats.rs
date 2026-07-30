@@ -192,10 +192,6 @@ impl FeStats {
             ..FeStats::default()
         };
 
-        if status.is_empty() {
-            return Ok(result);
-        }
-
         let mut props = [
             // delivery system
             DtvPropertyRaw::new(DTV_DELIVERY_SYSTEM, 0),

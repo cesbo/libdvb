@@ -16,12 +16,9 @@ use std::{
             AsFd,
             BorrowedFd,
         },
-        unix::{
-            fs::FileTypeExt,
-            io::{
-                AsRawFd,
-                RawFd,
-            },
+        unix::io::{
+            AsRawFd,
+            RawFd,
         },
     },
 };
