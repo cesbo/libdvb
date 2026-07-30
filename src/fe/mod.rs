@@ -294,69 +294,8 @@ impl FeDevice {
         Self::open(adapter, device, true)
     }
 
-    fn check_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
-        for p in cmdseq {
-            match *p {
-                DtvProperty::Frequency(v) => {
-                    if !self.frequency_range.contains(&v) {
-                        return Err(Error::InvalidProperty("frequency out of range".to_owned()));
-                    }
-                }
-                DtvProperty::SymbolRate(v) => {
-                    if !self.symbolrate_range.contains(&v) {
-                        return Err(Error::InvalidProperty("symbolrate out of range".to_owned()));
-                    }
-                }
-                DtvProperty::Inversion(v) => {
-                    if v == Inversion::Auto && !self.caps.contains(FeCaps::CAN_INVERSION_AUTO) {
-                        return Err(Error::InvalidProperty(
-                            "frontend does not support auto inversion".to_owned(),
-                        ));
-                    }
-                }
-                DtvProperty::TransmissionMode(v) => {
-                    if v == TransmitMode::Auto
-                        && !self.caps.contains(FeCaps::CAN_TRANSMISSION_MODE_AUTO)
-                    {
-                        return Err(Error::InvalidProperty(
-                            "frontend does not support auto transmission mode".to_owned(),
-                        ));
-                    }
-                }
-                DtvProperty::GuardInterval(v) => {
-                    if v == GuardInterval::Auto
-                        && !self.caps.contains(FeCaps::CAN_GUARD_INTERVAL_AUTO)
-                    {
-                        return Err(Error::InvalidProperty(
-                            "frontend does not support auto guard interval".to_owned(),
-                        ));
-                    }
-                }
-                DtvProperty::Hierarchy(v) => {
-                    if v == Hierarchy::Auto && !self.caps.contains(FeCaps::CAN_HIERARCHY_AUTO) {
-                        return Err(Error::InvalidProperty(
-                            "frontend does not support auto hierarchy".to_owned(),
-                        ));
-                    }
-                }
-                DtvProperty::StreamId(_) => {
-                    if !self.caps.contains(FeCaps::CAN_MULTISTREAM) {
-                        return Err(Error::InvalidProperty(
-                            "frontend does not support multistream".to_owned(),
-                        ));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-
     /// Sets properties on frontend device
     pub fn set_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
-        self.check_properties(cmdseq)?;
-
         let mut raw: Vec<DtvPropertyRaw> = Vec::with_capacity(cmdseq.len());
         for p in cmdseq {
             // DTV_SCRAMBLING_SEQUENCE_INDEX requires DVB API 5.11 or later
