@@ -254,13 +254,6 @@ impl FeDevice {
         let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
         let file = OpenOptions::new().read(true).write(is_write).open(&path)?;
 
-        if !file.metadata()?.file_type().is_char_device() {
-            return Err(Error::InvalidProperty(format!(
-                "{}: not a character device",
-                path
-            )));
-        }
-
         let mut fe = FeDevice {
             file,
 
