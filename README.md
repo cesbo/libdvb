@@ -58,6 +58,13 @@ The low-level interface is still available: `TuneRequest::properties()`
 builds the typed `Vec<DtvProperty>` command sequence, which can be applied
 with `FeDevice::set_properties()`.
 
+An application that needs full control over the command sequence - property
+groups without a `DtvProperty` variant such as `DTV_ISDBT_LAYER*`, or its own
+API-version gating - builds `DtvPropertyRaw` values and submits them verbatim
+with `FeDevice::set_properties_raw()`. `FeDevice::drain_events()` discards the
+events a tune leaves queued without touching the SEC state, which
+`FeDevice::clear()` switches off.
+
 Frontend information is available through explicit accessors:
 
 ```rust

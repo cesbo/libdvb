@@ -171,6 +171,8 @@ impl AsFd for FeDevice {
 
 impl FeDevice {
     /// Clears frontend settings and event queue
+    ///
+    /// Switches the LNB voltage and the 22 kHz tone off before sending `DTV_CLEAR`.
     pub fn clear(&self) -> Result<()> {
         let cmdseq = [
             DtvProperty::Voltage(SecVoltage::Off),
@@ -179,13 +181,28 @@ impl FeDevice {
         ];
         self.set_properties(&cmdseq)?;
 
+        self.drain_events()
+    }
+
+    /// Reads the queued frontend events and discards them
+    ///
+    /// The kernel queues up to [`FE_MAX_EVENT`] events, so draining makes the next event report
+    /// the current tune only. The device is switched to non-blocking mode for the duration of
+    /// the drain and back afterwards, so this also works on a frontend opened in blocking mode;
+    /// running two drains, or a drain and a blocking [`FeDevice::get_event`], on one device at
+    /// the same time is unsafe.
+    pub fn drain_events(&self) -> Result<()> {
         let original_flags = file_status_flags(self.as_raw_fd())?;
         set_file_status_flags(self.as_raw_fd(), original_flags | ::nix::libc::O_NONBLOCK)?;
 
         let mut event = FeEvent::default();
-        for _ in 0 .. FE_MAX_EVENT {
-            if self.get_event(&mut event).is_err() {
-                break;
+        // one read more than the queue holds: an overflowed queue reports the
+        // overflow first, without dequeuing an event for it
+        for _ in 0 ..= FE_MAX_EVENT {
+            match self.get_event(&mut event) {
+                Ok(()) => {}
+                Err(Error::Nix(::nix::errno::Errno::EOVERFLOW)) => {}
+                Err(_) => break,
             }
         }
 
@@ -285,6 +302,10 @@ impl FeDevice {
     }
 
     /// Sets properties on frontend device
+    ///
+    /// A `DTV_SCRAMBLING_SEQUENCE_INDEX` is dropped on DVB API older than 5.11; no other
+    /// property is validated. Use [`FeDevice::set_properties_raw`] to submit a command
+    /// sequence verbatim.
     pub fn set_properties(&self, cmdseq: &[DtvProperty]) -> Result<()> {
         let mut raw: Vec<DtvPropertyRaw> = Vec::with_capacity(cmdseq.len());
         for p in cmdseq {
@@ -299,9 +320,24 @@ impl FeDevice {
             raw.push(p.to_raw());
         }
 
+        self.set_properties_raw(&raw)
+    }
+
+    /// Sets properties on frontend device from an on-wire command sequence
+    ///
+    /// The sequence is submitted to `FE_SET_PROPERTY` as it is - nothing is filtered, reordered
+    /// or added. This covers properties without a [`DtvProperty`] variant, like the
+    /// `DTV_ISDBT_LAYER*` group, and callers doing their own API-version gating.
+    ///
+    /// `DTV_TUNE` acts on the whole per-frontend property cache, not only on the sequence it
+    /// arrives in; send `DTV_CLEAR` first to start from the cache defaults. A sequence longer
+    /// than `DTV_IOCTL_MAX_MSGS` properties, or an empty one, is rejected with `EINVAL`.
+    pub fn set_properties_raw(&self, cmdseq: &[DtvPropertyRaw]) -> Result<()> {
+        // the kernel copies the property array in and never writes back on the
+        // set path, so a shared slice is enough for the `*mut` the struct holds
         let cmd = DtvProperties {
-            num: raw.len() as u32,
-            props: raw.as_ptr() as *mut _,
+            num: cmdseq.len() as u32,
+            props: cmdseq.as_ptr() as *mut _,
         };
 
         // FE_SET_PROPERTY

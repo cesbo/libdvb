@@ -1041,15 +1041,26 @@ impl fmt::Debug for DtvPropertyRaw {
 
 impl DtvPropertyRaw {
     pub fn new(cmd: u32, data: u32) -> Self {
+        // The ioctl copies the whole record into the kernel, so every byte of the
+        // union has to be defined: fill it with zeroes and write the value into
+        // the leading four bytes, which is where the `data` member sits.
+        let mut u = [0u8; size_of::<DtvPropertyData>()];
+        u[.. 4].copy_from_slice(&data.to_ne_bytes());
+
         Self {
             cmd,
             __reserved_1: [0, 0, 0],
-            u: DtvPropertyData { data },
+            u: DtvPropertyData { __align: u },
             result: 0,
         }
     }
 
-    pub(crate) fn data(&self) -> u32 {
+    /// Reads the property payload as a plain 32-bit value
+    ///
+    /// Only scalar properties carry their value there. For a property whose
+    /// payload is a statistics array or a buffer this returns the leading four
+    /// bytes of that payload.
+    pub fn data(&self) -> u32 {
         let ptr = std::ptr::addr_of!(self.u).cast::<u32>();
         unsafe { ptr.read_unaligned() }
     }
@@ -1158,6 +1169,23 @@ mod tests {
         assert_eq!(size_of::<DtvFrontendStats>(), 37);
         assert_eq!(align_of::<DtvFrontendStats>(), 1);
         assert_eq!(offset_of!(DtvFrontendStats, stat), 1);
+    }
+
+    #[test]
+    fn fe_property_new_wire_bytes() {
+        let prop = DtvPropertyRaw::new(DTV_FREQUENCY, 0x1122_3344);
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                std::ptr::addr_of!(prop).cast::<u8>(),
+                size_of::<DtvPropertyRaw>(),
+            )
+        };
+
+        assert_eq!(prop.data(), 0x1122_3344);
+        assert_eq!(&bytes[.. 4], &DTV_FREQUENCY.to_ne_bytes());
+        assert_eq!(&bytes[4 .. 16], &[0u8; 12]);
+        assert_eq!(&bytes[16 .. 20], &0x1122_3344u32.to_ne_bytes());
+        assert!(bytes[20 ..].iter().all(|&b| b == 0));
     }
 
     #[test]
