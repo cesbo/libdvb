@@ -24,6 +24,8 @@ pub struct DvbSTune {
     pub frequency_khz: u32,
     /// Symbol rate in baud
     pub symbolrate: u32,
+    /// Modulation / constellation
+    pub modulation: Modulation,
     /// Inner FEC code rate
     pub fec: Fec,
     /// Spectral inversion
@@ -35,6 +37,7 @@ impl Default for DvbSTune {
         Self {
             frequency_khz: 0,
             symbolrate: 0,
+            modulation: Modulation::Qpsk,
             fec: Fec::Auto,
             inversion: Inversion::Auto,
         }
@@ -61,6 +64,10 @@ pub struct Mis {
     /// PLS code
     pub code: u32,
     /// Input stream identifier (`DTV_STREAM_ID`)
+    ///
+    /// The value reaches the property unchanged, so a driver-specific value
+    /// can be passed through it as well - such as the bit that switches the
+    /// frontend to delivering BBFrames instead of a transport stream.
     pub stream_id: u32,
 }
 
@@ -118,9 +125,9 @@ pub struct DvbS2Tune {
     pub pilot: Pilot,
     /// Roll-off factor
     pub rolloff: Rolloff,
-    /// Multistream / PLS parameters (`DTV_STREAM_ID` is always set when
-    /// present, `DTV_SCRAMBLING_SEQUENCE_INDEX` only when the driver
-    /// supports it)
+    /// Multistream / PLS parameters. `DTV_STREAM_ID` is always set when
+    /// present, `DTV_SCRAMBLING_SEQUENCE_INDEX` only when the PLS code
+    /// resolves to an index and the DVB API is 5.11 or later.
     pub mis: Option<Mis>,
 }
 
@@ -142,11 +149,13 @@ impl Default for DvbS2Tune {
 /// DVB-C annex / delivery system variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DvbCAnnex {
-    /// DVB-C Annex A/C (DVB-C as deployed in Europe / Japan)
+    /// DVB-C Annex A (ITU-T J.83A, as deployed in Europe)
     #[default]
     A,
     /// DVB-C Annex B (ITU-T J.83B, as deployed in North America)
     B,
+    /// DVB-C Annex C (ITU-T J.83C, as deployed in Japan)
+    C,
 }
 
 /// DVB-C tune parameters.
@@ -329,6 +338,7 @@ impl TuneRequest {
             TuneRequest::DvbC(tune) => match tune.annex {
                 DvbCAnnex::A => DeliverySystem::DvbcAnnexA,
                 DvbCAnnex::B => DeliverySystem::DvbcAnnexB,
+                DvbCAnnex::C => DeliverySystem::DvbcAnnexC,
             },
             TuneRequest::DvbT(_) => DeliverySystem::Dvbt,
             TuneRequest::DvbT2(_) => DeliverySystem::Dvbt2,
@@ -347,7 +357,7 @@ impl TuneRequest {
             TuneRequest::DvbS(tune) => {
                 cmdseq.extend_from_slice(&[
                     DtvProperty::Frequency(tune.frequency_khz),
-                    DtvProperty::Modulation(Modulation::Qpsk),
+                    DtvProperty::Modulation(tune.modulation),
                     DtvProperty::Inversion(tune.inversion),
                     DtvProperty::SymbolRate(tune.symbolrate),
                     DtvProperty::InnerFec(tune.fec),
@@ -537,6 +547,35 @@ mod tests {
         )));
     }
 
+    /// A driver-specific stream id reaches the property unchanged, and the
+    /// default Root code 0 keeps the scrambling index away: this is the bit
+    /// that switches a DVB-S2 frontend to BBFrame delivery.
+    #[test]
+    fn stream_id_passes_through_verbatim() {
+        let request = TuneRequest::DvbS2(DvbS2Tune {
+            frequency_khz: 1_294_000,
+            symbolrate: 27_500_000,
+            mis: Some(Mis {
+                mode: PlsMode::Root,
+                code: 0,
+                stream_id: 0x8000_0000,
+            }),
+            ..Default::default()
+        });
+
+        let properties = request.properties();
+        assert!(
+            properties
+                .iter()
+                .any(|p| matches!(p, DtvProperty::StreamId(0x8000_0000)))
+        );
+        assert!(
+            !properties
+                .iter()
+                .any(|p| matches!(p, DtvProperty::ScramblingSequenceIndex(_)))
+        );
+    }
+
     #[test]
     fn mis_pls_code() {
         // Default Root code 0 uses the default scrambling sequence
@@ -634,6 +673,26 @@ mod tests {
                 DtvProperty::Tune,
             ]
         );
+    }
+
+    #[test]
+    fn dvbc_annex_delivery_systems() {
+        for (annex, system) in [
+            (DvbCAnnex::A, DeliverySystem::DvbcAnnexA),
+            (DvbCAnnex::B, DeliverySystem::DvbcAnnexB),
+            (DvbCAnnex::C, DeliverySystem::DvbcAnnexC),
+        ] {
+            let request = TuneRequest::DvbC(DvbCTune {
+                annex,
+                ..Default::default()
+            });
+
+            assert_eq!(request.delivery_system(), system);
+            assert_eq!(
+                request.properties().first(),
+                Some(&DtvProperty::DeliverySystem(system))
+            );
+        }
     }
 
     #[test]

@@ -6,7 +6,7 @@ Supports three types of delivery systems:
 
 - Satellite: DVB-S, DVB-S2
 - Terrestrial: DVB-T, DVB-T2, ATSC, ISDB-T
-- Cable: DVB-C
+- Cable: DVB-C (Annex A, B, C)
 - DiSEqC 1.0
 - DiSEqC 1.1
 - EN 50494 - Unicable I
@@ -60,6 +60,30 @@ let request = TuneRequest::DvbS2(DvbS2Tune {
 });
 
 fe.tune(&request)?;
+```
+
+`DTV_STREAM_ID` belongs to the two delivery systems that have a stream to
+select: `DvbS2Tune::mis` carries it for a multistream transponder, together
+with the PLS the stream is scrambled with, and `DvbT2Tune::stream_id` is the
+PLP of a T2 multiplex. A root PLS code is resolved to the Gold scrambling
+sequence index, `DTV_SCRAMBLING_SEQUENCE_INDEX` is left alone for the default
+root code 0, and it is dropped altogether on a DVB API older than 5.11.
+
+The stream id reaches the property unchanged, so a driver-specific value can
+be passed through it as well - such as the bit that switches a DVB-S2
+frontend to delivering BBFrames instead of a transport stream:
+
+```rust
+let request = TuneRequest::DvbS2(DvbS2Tune {
+    frequency_khz,
+    symbolrate: 27500 * 1000,
+    mis: Some(Mis {
+        mode: PlsMode::Root,
+        code: 0,
+        stream_id: 0x8000_0000,
+    }),
+    ..Default::default()
+});
 ```
 
 The low-level interface is still available: `TuneRequest::properties()`
