@@ -9,28 +9,21 @@ use super::{
         Modulation,
         Pilot,
         Rolloff,
-        SecTone,
-        SecVoltage,
         TransmitMode,
     },
 };
 
 /// DVB-S tune parameters.
 ///
-/// `frequency_khz` is the intermediate frequency in kHz: the transponder
-/// frequency minus the LNB local oscillator frequency. Use
-/// [`FeDevice::use_diseqc`](super::FeDevice::use_diseqc) to drive the
-/// SEC/DiSEqC switch and obtain this value from the transponder frequency.
+/// `frequency_khz` is the intermediate frequency in kHz, as returned by
+/// [`FeDevice::setup_sec`](super::FeDevice::setup_sec) for the transponder
+/// this request tunes to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DvbSTune {
     /// Intermediate frequency in kHz
     pub frequency_khz: u32,
     /// Symbol rate in baud
     pub symbolrate: u32,
-    /// LNB voltage (polarization selection)
-    pub voltage: SecVoltage,
-    /// 22 kHz tone (band selection)
-    pub tone: SecTone,
     /// Inner FEC code rate
     pub fec: Fec,
     /// Spectral inversion
@@ -42,8 +35,6 @@ impl Default for DvbSTune {
         Self {
             frequency_khz: 0,
             symbolrate: 0,
-            voltage: SecVoltage::Off,
-            tone: SecTone::Off,
             fec: Fec::Auto,
             inversion: Inversion::Auto,
         }
@@ -117,10 +108,6 @@ pub struct DvbS2Tune {
     pub frequency_khz: u32,
     /// Symbol rate in baud
     pub symbolrate: u32,
-    /// LNB voltage (polarization selection)
-    pub voltage: SecVoltage,
-    /// 22 kHz tone (band selection)
-    pub tone: SecTone,
     /// Modulation / constellation
     pub modulation: Modulation,
     /// Inner FEC code rate
@@ -142,8 +129,6 @@ impl Default for DvbS2Tune {
         Self {
             frequency_khz: 0,
             symbolrate: 0,
-            voltage: SecVoltage::Off,
-            tone: SecTone::Off,
             modulation: Modulation::Psk8,
             fec: Fec::Auto,
             inversion: Inversion::Auto,
@@ -363,8 +348,6 @@ impl TuneRequest {
                 cmdseq.extend_from_slice(&[
                     DtvProperty::Frequency(tune.frequency_khz),
                     DtvProperty::Modulation(Modulation::Qpsk),
-                    DtvProperty::Voltage(tune.voltage),
-                    DtvProperty::Tone(tune.tone),
                     DtvProperty::Inversion(tune.inversion),
                     DtvProperty::SymbolRate(tune.symbolrate),
                     DtvProperty::InnerFec(tune.fec),
@@ -374,8 +357,6 @@ impl TuneRequest {
                 cmdseq.extend_from_slice(&[
                     DtvProperty::Frequency(tune.frequency_khz),
                     DtvProperty::Modulation(tune.modulation),
-                    DtvProperty::Voltage(tune.voltage),
-                    DtvProperty::Tone(tune.tone),
                     DtvProperty::Inversion(tune.inversion),
                     DtvProperty::SymbolRate(tune.symbolrate),
                     DtvProperty::InnerFec(tune.fec),
@@ -462,8 +443,6 @@ mod tests {
         let request = TuneRequest::DvbS(DvbSTune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
-            voltage: SecVoltage::V13,
-            tone: SecTone::Off,
             ..Default::default()
         });
 
@@ -474,8 +453,6 @@ mod tests {
                 DtvProperty::DeliverySystem(DeliverySystem::Dvbs),
                 DtvProperty::Frequency(1_294_000),
                 DtvProperty::Modulation(Modulation::Qpsk),
-                DtvProperty::Voltage(SecVoltage::V13),
-                DtvProperty::Tone(SecTone::Off),
                 DtvProperty::Inversion(Inversion::Auto),
                 DtvProperty::SymbolRate(27_500_000),
                 DtvProperty::InnerFec(Fec::Auto),
@@ -489,8 +466,6 @@ mod tests {
         let request = TuneRequest::DvbS2(DvbS2Tune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
-            voltage: SecVoltage::V18,
-            tone: SecTone::On,
             modulation: Modulation::Psk8,
             fec: Fec::Fec3_4,
             rolloff: Rolloff::R20,
@@ -510,8 +485,6 @@ mod tests {
                 DtvProperty::DeliverySystem(DeliverySystem::Dvbs2),
                 DtvProperty::Frequency(1_294_000),
                 DtvProperty::Modulation(Modulation::Psk8),
-                DtvProperty::Voltage(SecVoltage::V18),
-                DtvProperty::Tone(SecTone::On),
                 DtvProperty::Inversion(Inversion::Auto),
                 DtvProperty::SymbolRate(27_500_000),
                 DtvProperty::InnerFec(Fec::Fec3_4),
@@ -529,8 +502,6 @@ mod tests {
         let request = TuneRequest::DvbS2(DvbS2Tune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
-            voltage: SecVoltage::V13,
-            tone: SecTone::Off,
             mis: Some(Mis {
                 mode: PlsMode::Root,
                 code: 0,
@@ -557,8 +528,6 @@ mod tests {
         let request = TuneRequest::DvbS2(DvbS2Tune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
-            voltage: SecVoltage::V13,
-            tone: SecTone::Off,
             ..Default::default()
         });
 
@@ -776,8 +745,6 @@ mod tests {
         let request = TuneRequest::DvbS(DvbSTune {
             frequency_khz: 1_294_000,
             symbolrate: 27_500_000,
-            voltage: SecVoltage::V13,
-            tone: SecTone::Off,
             ..Default::default()
         });
 

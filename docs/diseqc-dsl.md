@@ -1,8 +1,8 @@
-# DiSEqC DSL
+# SEC/DiSEqC DSL
 
 libdvb accepts SEC/DiSEqC control sequences written as a short text DSL. A
 sequence is a list of single-letter commands, optionally separated by
-whitespace. Pass it through `DiseqcConfig::Dsl` to apply it to a frontend.
+whitespace. Pass it through `SecConfig::Dsl` to apply it to a frontend.
 
 ```text
 t V W200 [E0 10 38 F3] W15 T
@@ -56,24 +56,74 @@ A typical committed-switch command looks like `[E0 10 38 Fx]`:
 ## Using DSL
 
 ```rust
-use libdvb::{DiseqcConfig, FeDevice};
+use libdvb::{FeDevice, Lnb, SecConfig};
 
 let fe = FeDevice::open_rw(0, 0)?;
-let frontend_frequency_khz = fe.use_diseqc(12_320, DiseqcConfig::Dsl(
-    "t V W200 [E0 10 38 F3] W15 T".to_owned(),
-))?;
+let frontend_frequency_khz = fe.setup_sec(
+    12_320,
+    Lnb::Single { lof_mhz: 10_600 },
+    SecConfig::Dsl("t V W200 [E0 10 38 F3] W15 T".to_owned()),
+)?;
 ```
 
-`FeDevice::use_diseqc` parses and validates the DSL internally. Its first
-argument is the requested transponder frequency in MHz, and it returns the
-frontend frequency in kHz. DSL, switching, and toneburst configurations retain
-the requested frequency; Unicable configurations return the user-band
+`FeDevice::setup_sec` parses and validates the DSL internally, then runs the
+sequence and blocks for the waits in it. It takes the transponder frequency
+in MHz, converts it through the `Lnb`, and returns the frontend frequency in
+kHz. DSL, LNB, switching, and toneburst configurations return that
+intermediate frequency; Unicable configurations return the user-band
 frequency.
+
+Every configuration except `Dsl` also takes its band tone from the `Lnb` -
+tone on above the switch frequency of a `Universal` LNB, off otherwise - and
+those that encode the band in their command do so from the same value. A DSL
+sequence spells its tone commands out itself, so the derived band is not
+applied to it.
+
+`setup_sec` places the default waits between the commands, and is a wrapper
+over the two halves of the job:
+
+```rust
+use std::time::Duration;
+
+use libdvb::{FeDevice, Lnb, SecConfig, SecTimings, sec_sequence};
+
+let timings = SecTimings {
+    switch_settle: Duration::from_millis(250),
+    ..SecTimings::default()
+};
+
+let setup = sec_sequence(
+    12_320,
+    Lnb::Single { lof_mhz: 10_600 },
+    SecConfig::Dsl("t V W200 [E0 10 38 F3] W15 T".to_owned()),
+    timings,
+)?;
+
+let fe = FeDevice::open_rw(0, 0)?;
+fe.run_sec_sequence(&setup.sec_sequence)?;
+let frontend_frequency_khz = setup.frontend_frequency_khz;
+```
+
+`sec_sequence` is pure: it validates the configuration and returns the
+commands without touching the device. Its `SecTimings` argument holds the
+waits the built-in configurations place between commands - `switch_settle`,
+`message_gap`, `unicable_settle`, `unicable_hold` and `lnb_settle`. A DSL
+sequence carries its own waits and ignores the struct.
+
+`FeDevice::run_sec_sequence` then applies the commands in order. It sleeps
+for the waits on the calling thread, so an application on an event loop
+either runs it on a blocking-work thread, or splits the sequence at its
+`SecCommand::Wait` entries and drives the parts from its own timer.
 
 ## Built-in configurations
 
-`DiseqcConfig` also provides typed configurations for common commands:
+`SecConfig` also provides typed configurations for common commands:
 
+- `Lnb { voltage }` - no DiSEqC equipment: polarization voltage and band
+  tone only. Nothing is sent, but the voltage and tone still have to be set
+  and to settle, so this goes through the same call as the rest.
+- `Shared` - an LNB powered by another receiver on the same cable: the
+  voltage and the tone are released instead of driven.
 - `Switch1_0(DiseqcSwitchConfig)` - DiSEqC 1.0 committed switch, ports
   `1..=4`.
 - `Switch1_1(DiseqcSwitchConfig)` - DiSEqC 1.1 uncommitted switch, ports
@@ -84,16 +134,24 @@ frequency.
 
 ```rust
 use libdvb::{
-    DiseqcConfig,
     DiseqcSwitchConfig,
     FeDevice,
+    Lnb,
+    SecConfig,
 };
-use libdvb::fe::sys::{SecTone, SecVoltage};
+use libdvb::fe::sys::SecVoltage;
 
 let fe = FeDevice::open_rw(0, 0)?;
-let frontend_frequency_khz = fe.use_diseqc(12_320, DiseqcConfig::Switch1_0(DiseqcSwitchConfig {
-    port: 4,
-    voltage: SecVoltage::V18,
-    tone: SecTone::On,
-}))?;
+let frontend_frequency_khz = fe.setup_sec(
+    12_320,
+    Lnb::Universal {
+        lof_low_mhz: 9_750,
+        lof_high_mhz: 10_600,
+        switch_mhz: 11_700,
+    },
+    SecConfig::Switch1_0(DiseqcSwitchConfig {
+        port: 4,
+        voltage: SecVoltage::V18,
+    }),
+)?;
 ```

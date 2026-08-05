@@ -24,13 +24,15 @@ use std::{
 };
 
 pub use sec::{
-    DiseqcConfig,
     DiseqcSwitchConfig,
-    DiseqcTune,
+    Lnb,
     SecCommand,
+    SecConfig,
+    SecSetup,
+    SecTimings,
     ToneburstConfig,
     UnicableConfig,
-    diseqc_sequence,
+    sec_sequence,
 };
 pub use stats::{
     FeLevel,
@@ -357,9 +359,9 @@ impl FeDevice {
     ///
     /// The request is lowered to a DVBv5 property command sequence and
     /// applied with [`FeDevice::set_properties`].
-    /// For satellite systems the SEC/DiSEqC switch should be configured first with
-    /// [`FeDevice::use_diseqc`], which also translates the transponder frequency to the
-    /// intermediate frequency used by the request.
+    /// For satellite systems the SEC step runs first, with
+    /// [`FeDevice::setup_sec`]: it drives the LNB and any DiSEqC equipment,
+    /// and reports the frequency the request has to carry.
     pub fn tune(&self, request: &TuneRequest) -> Result<()> {
         self.set_properties(&request.properties())
     }
@@ -599,14 +601,43 @@ impl FeDevice {
         Ok(())
     }
 
-    /// Applies a DiSEqC configuration to the frontend.
+    /// Points the frontend at a transponder: converts the frequency through
+    /// the LNB, sets the polarization voltage and the band tone, drives any
+    /// DiSEqC equipment, and blocks for the waits the sequence asks for.
     ///
-    /// `frequency_mhz` is the requested transponder frequency. Returns the
-    /// resulting frontend frequency in kHz after any Unicable translation.
-    pub fn use_diseqc(&self, frequency_mhz: u32, config: DiseqcConfig) -> Result<u32> {
-        let tune = diseqc_sequence(frequency_mhz, config)?;
+    /// This is the whole SEC step of a satellite tune, and it must run
+    /// before the tune request: the voltage powers the switch and selects
+    /// the polarization, the band tone must be silent while a DiSEqC
+    /// command is on the wire, and each of those needs time to settle. For
+    /// that reason [`TuneRequest`] carries no voltage or tone of its own.
+    ///
+    /// `transponder_mhz` is the broadcast frequency; returns the frequency
+    /// to put in the tune request, in kHz. Use [`SecConfig::Lnb`] when there
+    /// is no DiSEqC equipment at all - the voltage and the tone still have
+    /// to be set.
+    ///
+    /// The waits are the [`SecTimings`] defaults. An installation that needs
+    /// its own calls [`sec_sequence`] with them and hands the result to
+    /// [`FeDevice::run_sec_sequence`], which is what this method does.
+    pub fn setup_sec(&self, transponder_mhz: u32, lnb: Lnb, config: SecConfig) -> Result<u32> {
+        let setup = sec_sequence(transponder_mhz, lnb, config, SecTimings::default())?;
+        self.run_sec_sequence(&setup.sec_sequence)?;
 
-        for command in &tune.sec_sequence {
+        Ok(setup.frontend_frequency_khz)
+    }
+
+    /// Runs a SEC sequence on the frontend, in order.
+    ///
+    /// [`SecCommand::Wait`] is served by `std::thread::sleep`, so the call
+    /// blocks for as long as the waits in the sequence add up to - a
+    /// committed-switch sequence takes a little over 200 ms. On an event
+    /// loop this belongs on a blocking-work thread, or split the sequence at
+    /// its waits and drive it from the runtime timer.
+    ///
+    /// The sequence usually comes from [`sec_sequence`], which also reports
+    /// the frequency to tune to once it has run.
+    pub fn run_sec_sequence(&self, sequence: &[SecCommand]) -> Result<()> {
+        for command in sequence {
             match command {
                 SecCommand::SetTone(value) => self.set_tone(*value)?,
                 SecCommand::SetVoltage(value) => self.set_voltage(*value)?,
@@ -616,29 +647,7 @@ impl FeDevice {
             }
         }
 
-        Ok(tune.frontend_frequency_khz)
-    }
-
-    /// Sets up a simple LNB without DiSEqC switching.
-    ///
-    /// `frequency_mhz` is the transponder frequency, `lof_mhz` is the LNB
-    /// local oscillator frequency, and `tone` selects the LNB band via the
-    /// 22 kHz tone. Returns the intermediate frequency in kHz
-    /// (`frequency_mhz - lof_mhz`) to use in the adapter tune request.
-    pub fn use_lnb(&self, frequency_mhz: u32, lof_mhz: u32, tone: SecTone) -> Result<u32> {
-        let frequency_khz = frequency_mhz
-            .checked_sub(lof_mhz)
-            .and_then(|v| v.checked_mul(1000))
-            .ok_or_else(|| {
-                Error::InvalidData(format!(
-                    "transponder frequency {} MHz is below the LNB oscillator frequency {} MHz",
-                    frequency_mhz, lof_mhz
-                ))
-            })?;
-
-        self.set_tone(tone)?;
-
-        Ok(frequency_khz)
+        Ok(())
     }
 
     /// Returns the current API version

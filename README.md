@@ -29,25 +29,33 @@ Example DVB-S2 tune:
 use libdvb::{
     DvbS2Tune,
     FeDevice,
+    Lnb,
+    SecConfig,
     TuneRequest,
-    fe::sys::{
-        SecTone,
-        SecVoltage,
-    },
+    fe::sys::SecVoltage,
 };
 
 let fe = FeDevice::open_rw(0, 0)?;
 
-// Optional: drive the SEC/DiSEqC switch and translate the transponder
-// frequency to the intermediate frequency (11044 MHz transponder,
-// 9750 MHz LNB local oscillator).
-let frequency_khz = fe.use_diseqc(11044, DiseqcConfig::Dsl("t v".to_owned()))?;
+// Convert the transponder frequency through the LNB, set the polarization
+// voltage and the band tone, drive the DiSEqC equipment if there is any,
+// and get the frontend frequency back. This step always comes before the
+// tune: the tune request itself carries no SEC state.
+let frequency_khz = fe.setup_sec(
+    11044,
+    Lnb::Universal {
+        lof_low_mhz: 9750,
+        lof_high_mhz: 10600,
+        switch_mhz: 11700,
+    },
+    SecConfig::Lnb {
+        voltage: SecVoltage::V13,
+    },
+)?;
 
 let request = TuneRequest::DvbS2(DvbS2Tune {
     frequency_khz,
     symbolrate: 27500 * 1000,
-    voltage: SecVoltage::V13,
-    tone: SecTone::Off,
     ..Default::default()
 });
 
@@ -56,7 +64,10 @@ fe.tune(&request)?;
 
 The low-level interface is still available: `TuneRequest::properties()`
 builds the typed `Vec<DtvProperty>` command sequence, which can be applied
-with `FeDevice::set_properties()`.
+with `FeDevice::set_properties()`. The SEC step splits the same way -
+`sec_sequence()` builds the `Vec<SecCommand>` without touching the device,
+taking the wait times as an argument, and `FeDevice::run_sec_sequence()`
+applies it.
 
 An application that needs full control over the command sequence - property
 groups without a `DtvProperty` variant such as `DTV_ISDBT_LAYER*`, or its own

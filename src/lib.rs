@@ -24,9 +24,7 @@ pub use dvr::DvrDevice;
 pub use fe::{
     ApiVersion,
     AtscTune,
-    DiseqcConfig,
     DiseqcSwitchConfig,
-    DiseqcTune,
     DtvProperty,
     DvbCAnnex,
     DvbCTune,
@@ -38,13 +36,17 @@ pub use fe::{
     FeLevel,
     FeStats,
     IsdbTTune,
+    Lnb,
     Mis,
     PlsMode,
     SecCommand,
+    SecConfig,
+    SecSetup,
+    SecTimings,
     ToneburstConfig,
     TuneRequest,
     UnicableConfig,
-    diseqc_sequence,
+    sec_sequence,
 };
 pub use net::NetDevice;
 pub use sec::SecDevice;

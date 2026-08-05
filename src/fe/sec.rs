@@ -25,6 +25,71 @@ pub enum SecCommand {
     Wait(Duration),
 }
 
+/// Low-noise block downconverter in front of the frontend.
+///
+/// Converts a transponder frequency into the intermediate frequency the
+/// frontend tunes to, together with the 22 kHz tone that selects that
+/// band - one decision, so the two cannot contradict each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lnb {
+    /// The frequency is already an intermediate frequency; nothing to
+    /// convert, and the tone stays off.
+    Passthrough,
+    /// One local oscillator.
+    Single {
+        /// Local oscillator frequency in MHz.
+        lof_mhz: u32,
+    },
+    /// Two local oscillators, selected by the 22 kHz tone. A transponder at
+    /// or above `switch_mhz` uses the high oscillator and turns the tone on.
+    Universal {
+        /// Low band local oscillator frequency in MHz.
+        lof_low_mhz: u32,
+        /// High band local oscillator frequency in MHz.
+        lof_high_mhz: u32,
+        /// Band switch frequency in MHz.
+        switch_mhz: u32,
+    },
+    /// Inverted conversion, as used in the C band: the intermediate
+    /// frequency is `lof_mhz - transponder`.
+    CBand {
+        /// Local oscillator frequency in MHz.
+        lof_mhz: u32,
+    },
+}
+
+impl Lnb {
+    /// Intermediate frequency in MHz for `transponder_mhz`, and the band
+    /// tone that selects it.
+    pub fn intermediate(&self, transponder_mhz: u32) -> Result<(u32, SecTone)> {
+        match *self {
+            Lnb::Passthrough => Ok((transponder_mhz, SecTone::Off)),
+            Lnb::Single { lof_mhz } => Ok((lnb_offset(transponder_mhz, lof_mhz)?, SecTone::Off)),
+            Lnb::Universal {
+                lof_low_mhz,
+                lof_high_mhz,
+                switch_mhz,
+            } => {
+                if transponder_mhz >= switch_mhz {
+                    Ok((lnb_offset(transponder_mhz, lof_high_mhz)?, SecTone::On))
+                } else {
+                    Ok((lnb_offset(transponder_mhz, lof_low_mhz)?, SecTone::Off))
+                }
+            }
+            Lnb::CBand { lof_mhz } => Ok((lnb_offset(lof_mhz, transponder_mhz)?, SecTone::Off)),
+        }
+    }
+}
+
+fn lnb_offset(from_mhz: u32, subtract_mhz: u32) -> Result<u32> {
+    from_mhz.checked_sub(subtract_mhz).ok_or_else(|| {
+        Error::InvalidData(format!(
+            "LNB conversion needs {} MHz to be at least {} MHz",
+            from_mhz, subtract_mhz
+        ))
+    })
+}
+
 /// Common inputs for DiSEqC switch commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiseqcSwitchConfig {
@@ -32,8 +97,6 @@ pub struct DiseqcSwitchConfig {
     pub port: u8,
     /// Polarization encoded in the switch command.
     pub voltage: SecVoltage,
-    /// Band encoded in the switch command.
-    pub tone: SecTone,
 }
 
 /// Inputs for toneburst A/B selection.
@@ -43,8 +106,6 @@ pub struct ToneburstConfig {
     pub burst: SecMiniCmd,
     /// Polarization to set before sending the burst.
     pub voltage: SecVoltage,
-    /// Tone state to restore after sending the burst.
-    pub tone: SecTone,
 }
 
 /// Common inputs for Unicable channel-change commands.
@@ -58,15 +119,57 @@ pub struct UnicableConfig {
     pub position: u8,
     /// Polarization encoded in the Unicable command.
     pub voltage: SecVoltage,
-    /// Band encoded in the Unicable command.
-    pub tone: SecTone,
     /// Optional EN 50607 PIN. It is ignored for Unicable I / EN 50494.
     pub pin: Option<u8>,
 }
 
-/// High-level DiSEqC setup mode.
+/// Wait times used while building a SEC sequence.
+///
+/// The defaults reproduce the sequences this module generates when nothing
+/// overrides them. [`SecConfig::Dsl`] spells its waits out in the
+/// sequence text itself and ignores this struct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecTimings {
+    /// Settle time after the voltage is set, before a switch command. The
+    /// switch is powered by that voltage and has to come up first.
+    pub switch_settle: Duration,
+    /// Gap between one SEC message and whatever follows it.
+    pub message_gap: Duration,
+    /// Settle time after the idle voltage, before it is raised to carry a
+    /// Unicable command.
+    pub unicable_settle: Duration,
+    /// Hold time after a Unicable command, before the voltage drops back.
+    pub unicable_hold: Duration,
+    /// Settle time after the voltage and again after the band tone of a
+    /// plain LNB setup.
+    pub lnb_settle: Duration,
+}
+
+impl Default for SecTimings {
+    fn default() -> Self {
+        Self {
+            switch_settle: Duration::from_millis(200),
+            message_gap: Duration::from_millis(15),
+            unicable_settle: Duration::from_millis(5),
+            unicable_hold: Duration::from_millis(50),
+            lnb_settle: Duration::from_millis(100),
+        }
+    }
+}
+
+/// What sits between the LNB and the frontend, and how to address it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiseqcConfig {
+pub enum SecConfig {
+    /// Nothing but the LNB: set the polarization voltage and the band tone.
+    Lnb {
+        /// Polarization selection.
+        voltage: SecVoltage,
+    },
+    /// An LNB powered by another receiver on the same cable. The voltage and
+    /// the tone are released instead of driven, so this receiver does not
+    /// fight the one that owns them; the band still follows the [`Lnb`],
+    /// because the other receiver is expected to be selecting it.
+    Shared,
     /// DiSEqC 1.0 committed switch.
     Switch1_0(DiseqcSwitchConfig),
     /// DiSEqC 1.1 uncommitted switch.
@@ -77,16 +180,17 @@ pub enum DiseqcConfig {
     Unicable1(UnicableConfig),
     /// Unicable II / EN 50607.
     Unicable2(UnicableConfig),
-    /// Custom SEC/DiSEqC sequence in the documented DSL format.
+    /// Custom SEC/DiSEqC sequence in the documented DSL format. It carries
+    /// its own tone commands, so the band the [`Lnb`] derives is not applied.
     Dsl(String),
 }
 
 /// Generated SEC sequence and the resulting frontend frequency.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiseqcTune {
-    /// Frontend frequency after DiSEqC translation, in kHz.
+pub struct SecSetup {
+    /// Frontend frequency after LNB and Unicable translation, in kHz.
     pub frontend_frequency_khz: u32,
-    /// SEC commands that perform the selected DiSEqC setup.
+    /// SEC commands that perform the setup.
     pub sec_sequence: Vec<SecCommand>,
 }
 
@@ -107,22 +211,67 @@ fn parse_sec_sequence(input: &str) -> Result<Vec<SecCommand>> {
     parser.parse()
 }
 
-/// Builds a SEC sequence for a high-level DiSEqC setup mode.
+/// Builds the SEC sequence that puts the requested transponder in front of
+/// the frontend, and reports the frequency to tune to afterwards.
 ///
-/// `frequency_mhz` is the requested transponder frequency.
-pub fn diseqc_sequence(frequency_mhz: u32, config: DiseqcConfig) -> Result<DiseqcTune> {
+/// `transponder_mhz` is the broadcast frequency; `lnb` converts it to the
+/// intermediate frequency and derives the band tone. `timings` are the wait
+/// times to place between the commands, and are ignored by
+/// [`SecConfig::Dsl`], which carries its own.
+pub fn sec_sequence(
+    transponder_mhz: u32,
+    lnb: Lnb,
+    config: SecConfig,
+    timings: SecTimings,
+) -> Result<SecSetup> {
+    let (frequency_mhz, band) = lnb.intermediate(transponder_mhz)?;
+
     match config {
-        DiseqcConfig::Switch1_0(config) => diseqc_1_0_sequence(frequency_mhz, config),
-        DiseqcConfig::Switch1_1(config) => diseqc_1_1_sequence(frequency_mhz, config),
-        DiseqcConfig::Toneburst(config) => toneburst_sequence(frequency_mhz, config),
-        DiseqcConfig::Unicable1(config) => unicable_1_sequence(frequency_mhz, config),
-        DiseqcConfig::Unicable2(config) => unicable_2_sequence(frequency_mhz, config),
-        DiseqcConfig::Dsl(input) => Ok(diseqc_tune(frequency_mhz, parse_sec_sequence(&input)?)),
+        SecConfig::Lnb { voltage } => Ok(lnb_sequence(frequency_mhz, voltage, band, timings)),
+        SecConfig::Shared => Ok(sec_setup(
+            frequency_mhz,
+            vec![
+                SecCommand::SetTone(SecTone::Off),
+                SecCommand::SetVoltage(SecVoltage::Off),
+            ],
+        )),
+        SecConfig::Switch1_0(config) => diseqc_1_0_sequence(frequency_mhz, config, band, timings),
+        SecConfig::Switch1_1(config) => diseqc_1_1_sequence(frequency_mhz, config, band, timings),
+        SecConfig::Toneburst(config) => {
+            Ok(toneburst_sequence(frequency_mhz, config, band, timings))
+        }
+        SecConfig::Unicable1(config) => unicable_1_sequence(frequency_mhz, config, band, timings),
+        SecConfig::Unicable2(config) => unicable_2_sequence(frequency_mhz, config, band, timings),
+        SecConfig::Dsl(input) => Ok(sec_setup(frequency_mhz, parse_sec_sequence(&input)?)),
     }
 }
 
+/// Builds the voltage/tone sequence of a plain LNB.
+fn lnb_sequence(
+    frequency_mhz: u32,
+    voltage: SecVoltage,
+    band: SecTone,
+    timings: SecTimings,
+) -> SecSetup {
+    sec_setup(
+        frequency_mhz,
+        vec![
+            SecCommand::SetTone(SecTone::Off),
+            SecCommand::SetVoltage(voltage),
+            SecCommand::Wait(timings.lnb_settle),
+            SecCommand::SetTone(band),
+            SecCommand::Wait(timings.lnb_settle),
+        ],
+    )
+}
+
 /// Builds a DiSEqC 1.0 committed-switch sequence.
-fn diseqc_1_0_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
+fn diseqc_1_0_sequence(
+    frequency_mhz: u32,
+    config: DiseqcSwitchConfig,
+    band: SecTone,
+    timings: SecTimings,
+) -> Result<SecSetup> {
     if !(1 ..= 4).contains(&config.port) {
         return Err(Error::InvalidData(format!(
             "DiSEqC 1.0 port must be in range 1..=4, got {}",
@@ -138,20 +287,21 @@ fn diseqc_1_0_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result
         } else {
             0x00
         })
-        | (if config.tone == SecTone::On {
-            0x01
-        } else {
-            0x00
-        });
+        | (if band == SecTone::On { 0x01 } else { 0x00 });
 
-    Ok(diseqc_tune(
+    Ok(sec_setup(
         frequency_mhz,
-        controlled_master_sequence(config.voltage, config.tone, [0xE0, 0x10, 0x38, data]),
+        controlled_master_sequence(config.voltage, band, [0xE0, 0x10, 0x38, data], timings),
     ))
 }
 
 /// Builds a DiSEqC 1.1 uncommitted-switch sequence.
-fn diseqc_1_1_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result<DiseqcTune> {
+fn diseqc_1_1_sequence(
+    frequency_mhz: u32,
+    config: DiseqcSwitchConfig,
+    band: SecTone,
+    timings: SecTimings,
+) -> Result<SecSetup> {
     if !(1 ..= 16).contains(&config.port) {
         return Err(Error::InvalidData(format!(
             "DiSEqC 1.1 port must be in range 1..=16, got {}",
@@ -162,29 +312,39 @@ fn diseqc_1_1_sequence(frequency_mhz: u32, config: DiseqcSwitchConfig) -> Result
     let port = config.port - 1;
     let data = 0xF0 | port;
 
-    Ok(diseqc_tune(
+    Ok(sec_setup(
         frequency_mhz,
-        controlled_master_sequence(config.voltage, config.tone, [0xE0, 0x10, 0x39, data]),
+        controlled_master_sequence(config.voltage, band, [0xE0, 0x10, 0x39, data], timings),
     ))
 }
 
 /// Builds a toneburst A/B sequence.
-fn toneburst_sequence(frequency_mhz: u32, config: ToneburstConfig) -> Result<DiseqcTune> {
-    Ok(diseqc_tune(
+fn toneburst_sequence(
+    frequency_mhz: u32,
+    config: ToneburstConfig,
+    band: SecTone,
+    timings: SecTimings,
+) -> SecSetup {
+    sec_setup(
         frequency_mhz,
         vec![
             SecCommand::SetTone(SecTone::Off),
             SecCommand::SetVoltage(config.voltage),
-            SecCommand::Wait(Duration::from_millis(15)),
+            SecCommand::Wait(timings.message_gap),
             SecCommand::SendBurst(config.burst),
-            SecCommand::Wait(Duration::from_millis(15)),
-            SecCommand::SetTone(config.tone),
+            SecCommand::Wait(timings.message_gap),
+            SecCommand::SetTone(band),
         ],
-    ))
+    )
 }
 
 /// Builds a Unicable I / EN 50494 channel-change sequence.
-fn unicable_1_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<DiseqcTune> {
+fn unicable_1_sequence(
+    frequency_mhz: u32,
+    config: UnicableConfig,
+    band: SecTone,
+    timings: SecTimings,
+) -> Result<SecSetup> {
     if !(1 ..= 8).contains(&config.slot) {
         return Err(Error::InvalidData(format!(
             "Unicable I slot must be in range 1..=8, got {}",
@@ -215,18 +375,24 @@ fn unicable_1_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<Dis
     let b1 = ((config.slot - 1) << 5)
         | (config.position << 4)
         | sec_voltage_bit(config.voltage, 0x08)
-        | sec_tone_bit(config.tone, 0x04)
+        | sec_tone_bit(band, 0x04)
         | ((x >> 8) as u8 & 0x03);
     let b2 = x as u8;
 
     Ok(unicable_tune(
         config.user_band_frequency_mhz,
         vec![0xE0, 0x10, 0x5A, b1, b2],
+        timings,
     ))
 }
 
 /// Builds a Unicable II / EN 50607 channel-change sequence.
-fn unicable_2_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<DiseqcTune> {
+fn unicable_2_sequence(
+    frequency_mhz: u32,
+    config: UnicableConfig,
+    band: SecTone,
+    timings: SecTimings,
+) -> Result<SecSetup> {
     if !(1 ..= 32).contains(&config.slot) {
         return Err(Error::InvalidData(format!(
             "Unicable II slot must be in range 1..=32, got {}",
@@ -253,9 +419,8 @@ fn unicable_2_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<Dis
 
     let b1 = ((config.slot - 1) << 3) | ((x >> 8) as u8 & 0x07);
     let b2 = x as u8;
-    let b3 = (config.position << 2)
-        | sec_voltage_bit(config.voltage, 0x02)
-        | sec_tone_bit(config.tone, 0x01);
+    let b3 =
+        (config.position << 2) | sec_voltage_bit(config.voltage, 0x02) | sec_tone_bit(band, 0x01);
 
     let mut msg = Vec::with_capacity(if config.pin.is_some() { 5 } else { 4 });
     msg.push(if config.pin.is_some() { 0x71 } else { 0x70 });
@@ -264,42 +429,43 @@ fn unicable_2_sequence(frequency_mhz: u32, config: UnicableConfig) -> Result<Dis
         msg.push(pin);
     }
 
-    Ok(unicable_tune(config.user_band_frequency_mhz, msg))
+    Ok(unicable_tune(config.user_band_frequency_mhz, msg, timings))
 }
 
 fn controlled_master_sequence<const N: usize>(
     voltage: SecVoltage,
     tone: SecTone,
     msg: [u8; N],
+    timings: SecTimings,
 ) -> Vec<SecCommand> {
     vec![
         SecCommand::SetTone(SecTone::Off),
         SecCommand::SetVoltage(voltage),
-        SecCommand::Wait(Duration::from_millis(200)),
+        SecCommand::Wait(timings.switch_settle),
         SecCommand::SendMasterCommand(msg.to_vec()),
-        SecCommand::Wait(Duration::from_millis(15)),
+        SecCommand::Wait(timings.message_gap),
         SecCommand::SetTone(tone),
     ]
 }
 
-fn diseqc_tune(frequency_mhz: u32, sec_sequence: Vec<SecCommand>) -> DiseqcTune {
-    DiseqcTune {
+fn sec_setup(frequency_mhz: u32, sec_sequence: Vec<SecCommand>) -> SecSetup {
+    SecSetup {
         frontend_frequency_khz: frequency_mhz * 1000,
         sec_sequence,
     }
 }
 
-fn unicable_tune(frequency_mhz: u32, msg: Vec<u8>) -> DiseqcTune {
-    DiseqcTune {
+fn unicable_tune(frequency_mhz: u32, msg: Vec<u8>, timings: SecTimings) -> SecSetup {
+    SecSetup {
         frontend_frequency_khz: frequency_mhz * 1000,
         sec_sequence: vec![
             SecCommand::SetVoltage(SecVoltage::V13),
             SecCommand::SetTone(SecTone::Off),
-            SecCommand::Wait(Duration::from_millis(5)),
+            SecCommand::Wait(timings.unicable_settle),
             SecCommand::SetVoltage(SecVoltage::V18),
-            SecCommand::Wait(Duration::from_millis(15)),
+            SecCommand::Wait(timings.message_gap),
             SecCommand::SendMasterCommand(msg),
-            SecCommand::Wait(Duration::from_millis(50)),
+            SecCommand::Wait(timings.unicable_hold),
             SecCommand::SetVoltage(SecVoltage::V13),
         ],
     }
