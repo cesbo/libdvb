@@ -15,6 +15,9 @@
 //! Host-side resources (en50221 8): Resource Manager, Application
 //! Information, Conditional Access Support (`CA_INFO` and `CA_PMT`), Host
 //! Control, Date-Time and MMI.
+//!
+//! That stack is the control path. On an external CI adapter the TS the CAM
+//! descrambles flows through a separate node, opened by [`CiTsDevice`].
 
 mod apdu;
 mod asn1;
@@ -26,6 +29,7 @@ mod spdu;
 pub mod sys;
 mod tpdu;
 mod transport;
+pub mod ts;
 
 use std::{
     fs::{
@@ -76,6 +80,7 @@ pub use self::{
         CiTransport,
         TransportRecv,
     },
+    ts::CiTsDevice,
 };
 use crate::{
     error::{

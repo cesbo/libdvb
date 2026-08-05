@@ -4,7 +4,6 @@ pub mod dvr;
 pub mod error;
 pub mod fe;
 pub mod net;
-pub mod sec;
 
 mod fd;
 mod sysfs;
@@ -19,6 +18,7 @@ pub use ca::{
     CiControllerConfig,
     CiSession,
     CiTransport,
+    CiTsDevice,
 };
 pub use dvr::DvrDevice;
 pub use fe::{
@@ -49,4 +49,3 @@ pub use fe::{
     sec_sequence,
 };
 pub use net::NetDevice;
-pub use sec::SecDevice;

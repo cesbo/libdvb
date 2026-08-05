@@ -171,18 +171,20 @@ println!("MAC: {}", interface.mac());
 
 ## External CI (DigitalDevices / TBS)
 
-`SecDevice` opens the CI adapter TS pipe (`ciN` node on DigitalDevices,
-`secN` on TBS) in non-blocking mode. It is control plane only: the TS
-data path uses the exposed file descriptors.
+`CiTsDevice` opens the CI adapter TS pipe (`ciN` node on DigitalDevices,
+`secN` on TBS) in non-blocking mode. It is the data path of the adapter
+whose control path is `CaDevice` and the en50221 stack above it, and it is
+control plane only: the TS itself moves through the exposed file
+descriptors.
 
 ```rust
-use libdvb::SecDevice;
+use libdvb::CiTsDevice;
 
-let sec = SecDevice::open(1, 0)?;
-sec.set_ci_bitrate(70)?; // MBit/s; TBS only, no-op for other vendors
+let ci = CiTsDevice::open(1, 0)?;
+ci.set_input_bitrate(70)?; // MBit/s; TBS only, no-op for other vendors
 
-let fd_in = sec.fd_in();   // write scrambled TS into the CAM
-let fd_out = sec.fd_out(); // read descrambled TS from the CAM
+let fd_in = ci.fd_in();   // write scrambled TS into the CAM
+let fd_out = ci.fd_out(); // read descrambled TS from the CAM
 ```
 
 ## CI

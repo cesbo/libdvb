@@ -2,9 +2,11 @@
 //!
 //! External CI adapters expose a full-duplex transport stream pipe:
 //! scrambled TS written to the input side is descrambled by the CAM and
-//! returned on the output side.
+//! returned on the output side. It is the data path of the hardware whose
+//! control path is [`CaDevice`](super::CaDevice) and the en50221 stack
+//! above it.
 //!
-//! [`SecDevice`] is control plane only: it probes the node, identifies
+//! [`CiTsDevice`] is control plane only: it probes the node, identifies
 //! the vendor and opens the pipe. The TS read/write data path uses the
 //! exposed file descriptors directly.
 
@@ -43,7 +45,7 @@ const MODULATOR_INPUT_BITRATE: u32 = 33;
 
 /// A reference to the external CI adapter TS device (DigitalDevices / TBS)
 #[derive(Debug)]
-pub struct SecDevice {
+pub struct CiTsDevice {
     fd_in: File,
     fd_out: File,
 
@@ -51,28 +53,28 @@ pub struct SecDevice {
     device_id: Option<u32>,
 }
 
-impl AsRawFd for SecDevice {
+impl AsRawFd for CiTsDevice {
     /// Returns the output side descriptor: the one to poll for readable TS
     fn as_raw_fd(&self) -> RawFd {
         self.fd_out.as_raw_fd()
     }
 }
 
-impl AsFd for SecDevice {
+impl AsFd for CiTsDevice {
     /// Borrows the output side descriptor
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.fd_out.as_fd()
     }
 }
 
-impl SecDevice {
+impl CiTsDevice {
     /// Attempts to open the CI adapter TS device in non-blocking mode.
     ///
     /// Probes the `/dev/dvb/adapterN/ciN` node (DigitalDevices) first,
     /// then `/dev/dvb/adapterN/secN` (TBS). Opens the node twice: the
     /// input side for writing TS into the CAM and the output side for
     /// reading the descrambled TS.
-    pub fn open(adapter: u32, device: u32) -> Result<SecDevice> {
+    pub fn open(adapter: u32, device: u32) -> Result<CiTsDevice> {
         let ci_path = format!("/dev/dvb/adapter{}/ci{}", adapter, device);
         let sec_path = format!("/dev/dvb/adapter{}/sec{}", adapter, device);
 
@@ -98,7 +100,7 @@ impl SecDevice {
         let vendor_id = crate::sysfs::read_hex_attr(&fd_out, "vendor");
         let device_id = crate::sysfs::read_hex_attr(&fd_out, "device");
 
-        Ok(SecDevice {
+        Ok(CiTsDevice {
             fd_in,
             fd_out,
             vendor_id,
@@ -131,12 +133,13 @@ impl SecDevice {
         (self.fd_in.into_raw_fd(), self.fd_out.into_raw_fd())
     }
 
-    /// Sets the CI input bitrate in MBit/s (TBS adapters only).
+    /// Sets the bitrate of the TS written into the CAM, in MBit/s (TBS
+    /// adapters only).
     ///
     /// Applies the TBS proprietary `MODULATOR_INPUT_BITRATE` property
     /// through the frontend ioctl on the input descriptor. Does nothing
     /// for adapters of other vendors.
-    pub fn set_ci_bitrate(&self, bitrate: u32) -> Result<()> {
+    pub fn set_input_bitrate(&self, bitrate: u32) -> Result<()> {
         if !matches!(self.vendor_id, Some(VENDOR_TBS)) {
             return Ok(());
         }
