@@ -62,6 +62,11 @@ let request = TuneRequest::DvbS2(DvbS2Tune {
 fe.tune(&request)?;
 ```
 
+`Lnb::auto` picks the LNB from the transponder frequency itself for a
+configuration that does not name one: an L band frequency passes through, the
+C and S bands invert around a single oscillator, and the Ku band gets the
+universal LNB above.
+
 `DTV_STREAM_ID` belongs to the two delivery systems that have a stream to
 select: `DvbS2Tune::mis` carries it for a multistream transponder, together
 with the PLS the stream is scrambled with, and `DvbT2Tune::stream_id` is the

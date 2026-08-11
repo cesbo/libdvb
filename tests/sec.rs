@@ -68,6 +68,49 @@ fn lnb_rejects_a_transponder_it_cannot_convert() {
 }
 
 #[test]
+fn lnb_auto_picks_the_lnb_of_the_band() {
+    assert_eq!(Lnb::auto(1_232), Some(Lnb::Passthrough));
+    assert_eq!(Lnb::auto(2_600), Some(Lnb::CBand { lof_mhz: 3_650 }));
+    assert_eq!(Lnb::auto(3_800), Some(Lnb::CBand { lof_mhz: 5_150 }));
+    assert_eq!(Lnb::auto(4_600), Some(Lnb::CBand { lof_mhz: 5_750 }));
+    assert_eq!(Lnb::auto(LOW_BAND), Some(UNIVERSAL));
+    assert_eq!(Lnb::auto(HIGH_BAND), Some(UNIVERSAL));
+}
+
+#[test]
+fn lnb_auto_converts_every_frequency_it_accepts() {
+    for transponder in 0 ..= 30_000u32 {
+        let Some(lnb) = Lnb::auto(transponder) else {
+            continue;
+        };
+
+        let (intermediate, _) = lnb.intermediate(transponder).unwrap();
+        assert!(
+            (950 ..= 2_650).contains(&intermediate),
+            "{transponder} MHz converts to {intermediate} MHz"
+        );
+    }
+}
+
+#[test]
+fn lnb_auto_rejects_frequencies_between_the_bands() {
+    // band edges are inclusive on both sides, except the Ku band, whose
+    // upper edge is the first frequency no universal LNB reaches
+    assert!(Lnb::auto(949).is_none());
+    assert!(Lnb::auto(2_151).is_none());
+    assert!(Lnb::auto(2_499).is_none());
+    assert!(Lnb::auto(2_701).is_none());
+    assert!(Lnb::auto(3_399).is_none());
+    assert!(Lnb::auto(4_201).is_none());
+    assert!(Lnb::auto(4_499).is_none());
+    assert!(Lnb::auto(4_801).is_none());
+    assert!(Lnb::auto(10_699).is_none());
+    assert!(Lnb::auto(13_250).is_none());
+    assert!(Lnb::auto(0).is_none());
+    assert!(Lnb::auto(u32::MAX).is_none());
+}
+
+#[test]
 fn sec_dsl_sequence_generates_sec_commands() {
     let tune = sec_sequence(
         LOW_BAND,

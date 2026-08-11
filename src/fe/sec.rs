@@ -59,6 +59,34 @@ pub enum Lnb {
 }
 
 impl Lnb {
+    /// Picks the LNB a transponder frequency in MHz implies.
+    ///
+    /// Each broadcast band is served by one kind of LNB, so the frequency
+    /// alone identifies the conversion: an L-band frequency is already an
+    /// intermediate frequency, the C and S bands invert around a single
+    /// oscillator, and the Ku band uses the universal two-oscillator LNB.
+    /// Returns `None` for a frequency outside every known band, where no
+    /// oscillator can be assumed.
+    pub fn auto(transponder_mhz: u32) -> Option<Lnb> {
+        match transponder_mhz {
+            // L band: an intermediate frequency already
+            950 ..= 2_150 => Some(Lnb::Passthrough),
+            // S band
+            2_500 ..= 2_700 => Some(Lnb::CBand { lof_mhz: 3_650 }),
+            // C band
+            3_400 ..= 4_200 => Some(Lnb::CBand { lof_mhz: 5_150 }),
+            // extended C band
+            4_500 ..= 4_800 => Some(Lnb::CBand { lof_mhz: 5_750 }),
+            // Ku band
+            10_700 .. 13_250 => Some(Lnb::Universal {
+                lof_low_mhz: 9_750,
+                lof_high_mhz: 10_600,
+                switch_mhz: 11_700,
+            }),
+            _ => None,
+        }
+    }
+
     /// Intermediate frequency in MHz for `transponder_mhz`, and the band
     /// tone that selects it.
     pub fn intermediate(&self, transponder_mhz: u32) -> Result<(u32, SecTone)> {
