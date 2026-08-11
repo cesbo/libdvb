@@ -1,6 +1,11 @@
 use std::{
+    borrow::Cow,
     fmt,
     mem,
+    os::fd::{
+        AsFd,
+        AsRawFd,
+    },
 };
 
 use bitflags::bitflags;
@@ -131,6 +136,39 @@ impl Default for FeInfo {
 }
 
 impl FeInfo {
+    /// Reads the info block (`FE_GET_INFO`) from an open frontend device.
+    ///
+    /// [`FeDevice`](crate::fe::FeDevice) reads the same block while opening and reports it
+    /// through its accessors. This reads it from a plain file descriptor, for a caller that
+    /// probes a frontend without opening it as a device - the info block answers on a
+    /// frontend too old for the DVBv5 properties an open needs.
+    pub fn read<F: AsFd>(fd: &F) -> Result<FeInfo> {
+        let mut info = FeInfo::default();
+
+        // FE_GET_INFO
+        nix::ioctl_read!(
+            #[inline]
+            ioctl_call,
+            b'o',
+            61,
+            FeInfo
+        );
+        unsafe { ioctl_call(fd.as_fd().as_raw_fd(), info.as_mut_ptr()) }?;
+
+        Ok(info)
+    }
+
+    /// Frontend name up to its terminator, with invalid UTF-8 replaced.
+    pub fn name_lossy(&self) -> Cow<'_, str> {
+        let end = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
+
+        String::from_utf8_lossy(&self.name[.. end])
+    }
+
     pub fn as_mut_ptr(&mut self) -> *mut FeInfo {
         self as *mut _
     }
@@ -1144,6 +1182,25 @@ mod tests {
         assert_eq!(offset_of!(FeInfo, frequency_min), 132);
         assert_eq!(offset_of!(FeInfo, symbol_rate_min), 148);
         assert_eq!(offset_of!(FeInfo, caps), 164);
+    }
+
+    #[test]
+    fn fe_info_name() {
+        let mut info = FeInfo::default();
+        info.name[.. 12].copy_from_slice(b"STV0910 demo");
+        assert_eq!(info.name_lossy(), "STV0910 demo");
+
+        // a name that fills the field has no terminator to stop at
+        let mut info = FeInfo::default();
+        info.name.fill(b'x');
+        assert_eq!(info.name_lossy().len(), info.name.len());
+
+        // the kernel gives no encoding guarantee for the field
+        let mut info = FeInfo::default();
+        info.name[.. 2].copy_from_slice(&[b'a', 0xFF]);
+        assert_eq!(info.name_lossy(), "a\u{FFFD}");
+
+        assert_eq!(FeInfo::default().name_lossy(), "");
     }
 
     #[test]

@@ -4,7 +4,6 @@ pub mod sys;
 mod tune;
 
 use std::{
-    ffi::CStr,
     fmt,
     fs::{
         File,
@@ -214,23 +213,9 @@ impl FeDevice {
     }
 
     fn get_info(&mut self) -> Result<()> {
-        let mut feinfo = FeInfo::default();
+        let feinfo = FeInfo::read(&self.file)?;
 
-        // FE_GET_INFO
-        nix::ioctl_read!(
-            #[inline]
-            ioctl_call,
-            b'o',
-            61,
-            FeInfo
-        );
-        unsafe { ioctl_call(self.as_raw_fd(), &mut feinfo as *mut _) }?;
-
-        if let Ok(name) = CStr::from_bytes_until_nul(&feinfo.name)
-            && let Ok(name) = name.to_str()
-        {
-            self.name = name.to_owned();
-        }
+        self.name = feinfo.name_lossy().into_owned();
 
         self.frequency_range = feinfo.frequency_min .. feinfo.frequency_max;
         self.symbolrate_range = feinfo.symbol_rate_min .. feinfo.symbol_rate_max;
