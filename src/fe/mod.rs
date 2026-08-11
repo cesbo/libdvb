@@ -171,18 +171,13 @@ impl AsFd for FeDevice {
 }
 
 impl FeDevice {
-    /// Clears frontend settings and event queue
-    ///
-    /// Switches the LNB voltage and the 22 kHz tone off before sending `DTV_CLEAR`.
+    /// Clears the tune settings (`DTV_CLEAR`) and the event queue
     pub fn clear(&self) -> Result<()> {
-        let cmdseq = [
-            DtvProperty::Voltage(SecVoltage::Off),
-            DtvProperty::Tone(SecTone::Off),
-            DtvProperty::Clear,
-        ];
-        self.set_properties(&cmdseq)?;
+        let result = self.set_properties(&[DtvProperty::Clear]);
 
-        self.drain_events()
+        let _ = self.drain_events();
+
+        result
     }
 
     /// Reads the queued frontend events and discards them
