@@ -4,6 +4,7 @@ pub mod dvr;
 pub mod error;
 pub mod fe;
 pub mod net;
+pub mod scan;
 
 mod fd;
 mod sysfs;
@@ -49,3 +50,7 @@ pub use fe::{
     sec_sequence,
 };
 pub use net::NetDevice;
+pub use scan::{
+    FeProbe,
+    scan,
+};
