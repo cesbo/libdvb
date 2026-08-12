@@ -27,6 +27,10 @@ use std::{
 use super::{
     CaDevice,
     capmt::Program,
+    pacer::{
+        CaPmtChange,
+        CaPmtPacer,
+    },
     resource::{
         ApplicationInfo,
         ResourceId,
@@ -117,6 +121,14 @@ pub struct CiControllerConfig {
     pub response_timeout: Duration,
     /// Delay before retrying after a successful global reset
     pub retry_interval: Duration,
+    /// Minimum interval between the applications of queued CA_PMT
+    /// changes; also the delay between the confirmed CA handshake and the
+    /// first CA_PMT (see [`CiController::set_program`])
+    pub ca_pmt_interval: Duration,
+    /// Extra hold after APPLICATION_INFO before the CA_PMT readiness
+    /// countdown starts: some CAMs (NDS Videoguard) reject CA_PMT sent
+    /// right after identification
+    pub ca_pmt_settle: Duration,
 }
 
 impl Default for CiControllerConfig {
@@ -127,6 +139,8 @@ impl Default for CiControllerConfig {
             create_tc_timeout: Duration::from_secs(2),
             response_timeout: Duration::from_secs(2),
             retry_interval: Duration::from_secs(1),
+            ca_pmt_interval: Duration::from_secs(20),
+            ca_pmt_settle: Duration::from_secs(10),
         }
     }
 }
@@ -186,6 +200,11 @@ impl ControllerIo for KernelControllerIo {
 /// no worker thread. `poll_event()` consumes already-readable link frames;
 /// `tick(now)` performs status checks, transport polling and timeout work.
 ///
+/// Program changes ([`CiController::set_program`] and
+/// [`CiController::remove_program`]) are queued and applied from `tick`
+/// at the pace set by [`CiControllerConfig::ca_pmt_interval`] once
+/// [`CiController::ca_pmt_ready`] reports the CAM handshake complete.
+///
 /// Linux `CA_RESET` resets the whole CA interface rather than one slot.
 /// Consequently recovery of one failed slot clears the transport and
 /// session state of every slot owned by this controller. `SlotFailed`
@@ -196,6 +215,7 @@ pub struct CiController {
     slots: Vec<ControllerSlot>,
     events: VecDeque<CaEvent>,
     config: CiControllerConfig,
+    pacer: CaPmtPacer,
     io: Box<dyn ControllerIo>,
     next_status_check: Option<Instant>,
     last_tick: Option<Instant>,
@@ -263,11 +283,13 @@ impl CiController {
         io: Box<dyn ControllerIo>,
     ) -> Self {
         let slots_num = session.transport().slots_num();
+        let pacer = CaPmtPacer::new(config.ca_pmt_interval, config.ca_pmt_settle);
         CiController {
             session,
             slots: (0 .. slots_num).map(|_| ControllerSlot::new()).collect(),
             events: VecDeque::new(),
             config,
+            pacer,
             io,
             next_status_check: None,
             last_tick: None,
@@ -321,29 +343,51 @@ impl CiController {
 
     /// Adds or replaces a program in the CAM selection.
     ///
-    /// `pmt_section` is one complete raw MPEG-TS PMT section including its CRC32. The desired
-    /// program is retained across CAM session reconnections and sent after a matching CA_INFO
-    /// arrives. Returns the `program_number` parsed from the PMT.
+    /// `pmt_section` is one complete raw MPEG-TS PMT section including its CRC32, parsed and
+    /// validated immediately; the controller owns everything it needs, so the input buffer may
+    /// be reused after this call.
+    ///
+    /// The change is queued and paced: `tick(now)` applies at most one queued change per
+    /// [`CiControllerConfig::ca_pmt_interval`] once the readiness gate is open (see
+    /// [`CiController::ca_pmt_ready`]). A queued select for the same program is replaced in
+    /// place; a queued remove stays ahead of the new select. Once applied, the desired program
+    /// is retained across CAM session reconnections and sent after a matching CA_INFO arrives.
+    /// Returns the `program_number` parsed from the PMT.
     pub fn set_program(&mut self, pmt_section: &[u8]) -> Result<u16> {
         let program = Program::parse(pmt_section)?;
         let program_number = program.program_number();
-        let result = self.session.set_program(program);
-        self.finish_program_command(result)?;
+        self.pacer.push_set(program);
         Ok(program_number)
     }
 
     /// Removes a program from the CAM selection.
     ///
-    /// Removing an unknown program is a successful no-op. A selected program is withdrawn with
-    /// CA_PMT `NOT_SELECTED` from every matching Conditional Access application.
+    /// The change is queued and paced like [`CiController::set_program`], dropping every queued
+    /// change for the same program first. Removing an unknown program is a successful no-op. A
+    /// selected program is withdrawn with CA_PMT `NOT_SELECTED` from every matching Conditional
+    /// Access application.
     pub fn remove_program(&mut self, program_number: u16) -> Result<()> {
         if program_number == 0 {
             return Err(Error::InvalidProperty(
                 "CA program number must not be zero".to_owned(),
             ));
         }
-        let result = self.session.remove_program(program_number);
-        self.finish_program_command(result)
+        self.pacer.push_remove(program_number);
+        Ok(())
+    }
+
+    /// Whether the CA_PMT readiness gate is open: a CAM confirmed the handshake
+    /// (APPLICATION_INFO or a non-empty CA_INFO) at least one pacing interval ago and queued
+    /// program changes are being applied. An empty CA_INFO completes the protocol handshake but
+    /// cannot descramble anything, so it does not open the gate. The gate closes on a global
+    /// recovery or [`CiController::reset`]; queued changes are kept for the next handshake.
+    pub fn ca_pmt_ready(&self) -> bool {
+        self.pacer.ready()
+    }
+
+    /// Changes the CA_PMT pacing interval; effective from the next `tick`
+    pub fn set_ca_pmt_interval(&mut self, interval: Duration) {
+        self.pacer.set_interval(interval);
     }
 
     /// Asks the CAM to enter its menu
@@ -400,6 +444,7 @@ impl CiController {
     pub fn reset(&mut self) -> Result<()> {
         self.collect_session_events();
         self.drop_all_slots();
+        self.pacer.reset_gate();
         self.deferred_link_failure = false;
 
         match self.io.reset(self.session.transport().link()) {
@@ -501,8 +546,8 @@ impl CiController {
         }
     }
 
-    /// Advances physical slot checks, transport polling and timeouts
-    /// without blocking
+    /// Advances physical slot checks, transport polling, timeouts and the
+    /// paced application of queued CA_PMT changes without blocking
     pub fn tick(&mut self, now: Instant) -> Result<()> {
         self.last_tick = Some(now);
         self.collect_session_events();
@@ -552,7 +597,7 @@ impl CiController {
         }
 
         self.collect_session_events();
-        Ok(())
+        self.dispatch_ca_pmt(now)
     }
 
     fn require_active(&self, slot_id: u8) -> Result<()> {
@@ -582,6 +627,19 @@ impl CiController {
                 Err(error)
             }
         }
+    }
+
+    /// Applies at most one queued CA_PMT change per pacing interval
+    fn dispatch_ca_pmt(&mut self, now: Instant) -> Result<()> {
+        let Some(change) = self.pacer.poll(now) else {
+            return Ok(());
+        };
+
+        let result = match change {
+            CaPmtChange::Set(program) => self.session.set_program(program),
+            CaPmtChange::Remove(program_number) => self.session.remove_program(program_number),
+        };
+        self.finish_program_command(result)
     }
 
     fn finish_program_command(&mut self, result: Result<Vec<u8>>) -> Result<()> {
@@ -841,6 +899,11 @@ impl CiController {
                         .get(usize::from(slot_id))
                         .is_some_and(|slot| slot.status == CaSlotStatus::Active)
                     {
+                        // the readiness countdown (re)starts with the settle
+                        // hold; timed with tick granularity
+                        if let Some(now) = self.last_tick {
+                            self.pacer.arm_application_info(now);
+                        }
                         self.recompute_cam_status(slot_id);
                         self.events
                             .push_back(CaEvent::ApplicationInfo { slot_id, info });
@@ -864,6 +927,14 @@ impl CiController {
                         .get(usize::from(slot_id))
                         .is_some_and(|slot| slot.status == CaSlotStatus::Active)
                     {
+                        // an empty CAID list completes the protocol handshake
+                        // but cannot descramble anything, so it does not open
+                        // the CA_PMT gate
+                        if !caids.is_empty()
+                            && let Some(now) = self.last_tick
+                        {
+                            self.pacer.arm_ca_info(now);
+                        }
                         self.recompute_cam_status(slot_id);
                         self.events.push_back(CaEvent::CaInfo {
                             slot_id,
@@ -920,6 +991,7 @@ impl CiController {
         }
 
         self.drop_all_slots();
+        self.pacer.reset_gate();
         let reset_result = self.io.reset(self.session.transport().link());
         let retry_at = deadline(now, self.config.retry_interval);
         self.link_suspended = true;
@@ -1175,10 +1247,39 @@ mod tests {
             create_tc_timeout: Duration::from_millis(100),
             response_timeout: Duration::from_millis(100),
             retry_interval: Duration::from_millis(50),
+            // out of reach: tests of the other machinery never open the gate
+            ca_pmt_interval: Duration::from_secs(3600),
+            ca_pmt_settle: Duration::ZERO,
         }
     }
 
+    /// Configuration for the CA_PMT pacing tests: the pacing interval is
+    /// the only running deadline, everything else is out of reach.
+    fn pacing_config() -> CiControllerConfig {
+        CiControllerConfig {
+            slot_status_interval: Duration::ZERO,
+            transport_poll_interval: Duration::from_secs(3600),
+            create_tc_timeout: Duration::from_secs(3600),
+            response_timeout: Duration::from_secs(3600),
+            retry_interval: Duration::from_millis(50),
+            ca_pmt_interval: Duration::from_millis(200),
+            ca_pmt_settle: Duration::from_millis(300),
+        }
+    }
+
+    /// One step of the pacing clock: strictly past the interval boundary
+    fn pace_step() -> Duration {
+        pacing_config().ca_pmt_interval + Duration::from_millis(1)
+    }
+
     fn pair(slots_num: u8) -> (CiController, TestCam, Arc<Mutex<MockState>>) {
+        pair_with(slots_num, config())
+    }
+
+    fn pair_with(
+        slots_num: u8,
+        config: CiControllerConfig,
+    ) -> (CiController, TestCam, Arc<Mutex<MockState>>) {
         let (host, cam) = UnixDatagram::pair().unwrap();
         host.set_nonblocking(true).unwrap();
         cam.set_nonblocking(true).unwrap();
@@ -1199,7 +1300,7 @@ mod tests {
             fail_reset: false,
         }));
         let controller =
-            CiController::from_parts(session, config(), Box::new(MockIo(Arc::clone(&state))));
+            CiController::from_parts(session, config, Box::new(MockIo(Arc::clone(&state))));
 
         (controller, TestCam { file: cam }, state)
     }
@@ -1242,6 +1343,18 @@ mod tests {
             } if *event_slot == slot_id
         )));
         assert_eq!(controller.status(slot_id).unwrap(), CaSlotStatus::Active);
+    }
+
+    /// The first tick of an Active slot issues the initial transport poll;
+    /// acknowledge it so the pacing tests keep the link idle.
+    fn ack_initial_poll(controller: &mut CiController, cam: &mut TestCam, now: Instant) {
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(0, TpduTag::DATA_LAST, &[]).unwrap()
+        );
+        cam.send_status(0, false);
+        assert_eq!(controller.poll_event().unwrap(), None);
     }
 
     fn open_resource(
@@ -1960,16 +2073,18 @@ mod tests {
 
     #[test]
     fn test_ca_pmt_program_lifecycle_and_session_restore() {
-        let (mut controller, mut cam, state) = pair(1);
-        let now = Instant::now();
+        let (mut controller, mut cam, state) = pair_with(1, pacing_config());
+        let mut now = Instant::now();
         let caid = 0x0100;
         let first = pmt_section(100, 1, caid);
         let second = pmt_section(200, 2, caid);
 
-        // Programs may be configured before a CAM or CA session exists.
+        // Programs may be queued before a CAM or CA session exists.
         assert_eq!(controller.set_program(&first).unwrap(), 100);
+        assert!(!controller.ca_pmt_ready());
         assert!(cam.recv().is_none());
         activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
 
         let ca_session = open_resource(
             &mut controller,
@@ -1987,6 +2102,17 @@ mod tests {
                 ..
             } if *session_id == ca_session
         )));
+
+        // The queued select is paced: the gate opens one interval after
+        // CA_INFO without releasing anything, the change follows one
+        // interval later.
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(controller.ca_pmt_ready());
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2005,12 +2131,19 @@ mod tests {
         assert!(drain(&mut controller).is_empty());
         assert!(cam.recv().is_none());
 
-        // Re-applying an identical section is idempotent. A second program
-        // is ADDed, and replacing an existing PMT uses UPDATE.
+        // A re-queued identical section is released on its own interval
+        // but dropped by the program registry as idempotent - nothing
+        // reaches the CAM.
         controller.set_program(&first).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert!(cam.recv().is_none());
 
+        // A second program is ADDed, and replacing an existing PMT uses
+        // UPDATE; every change takes one pacing interval.
         controller.set_program(&second).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2027,6 +2160,8 @@ mod tests {
 
         let updated_first = pmt_section(100, 3, caid);
         controller.set_program(&updated_first).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2045,6 +2180,8 @@ mod tests {
         // selected form. A later matching update selects it again.
         let nonmatching_first = pmt_section(100, 4, 0x0500);
         controller.set_program(&nonmatching_first).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2060,6 +2197,8 @@ mod tests {
         assert!(drain(&mut controller).is_empty());
 
         controller.set_program(&updated_first).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2075,6 +2214,8 @@ mod tests {
         assert!(drain(&mut controller).is_empty());
 
         controller.remove_program(100).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2089,10 +2230,13 @@ mod tests {
         cam.send_status(0, false);
         assert!(drain(&mut controller).is_empty());
         controller.remove_program(999).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert!(cam.recv().is_none());
 
         // Desired programs belong to the controller, not the transient CA
-        // session. Reopening the resource restores the remaining program.
+        // session. Reopening the resource restores the remaining program
+        // right away: the registry synchronization is not paced.
         cam.send_spdu(0, &[0x95, 0x02, (ca_session >> 8) as u8, ca_session as u8]);
         let _ = drain(&mut controller);
         assert_eq!(
@@ -2124,6 +2268,187 @@ mod tests {
                 &second,
                 caid,
                 CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+    }
+
+    #[test]
+    fn test_application_info_settle_delays_ca_pmt_gate() {
+        let (mut controller, mut cam, state) = pair_with(1, pacing_config());
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+
+        let app_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::APPLICATION_INFORMATION,
+            ApduTag::APPLICATION_INFO_ENQ,
+        );
+        cam.send_apdu(
+            0,
+            app_session,
+            ApduTag::APPLICATION_INFO,
+            &[0x01, 0x12, 0x34, 0x56, 0x78, 0x03, b'C', b'A', b'M'],
+        );
+        let _ = drain(&mut controller);
+
+        // the readiness countdown starts at the settle hold past the
+        // event, so the plain interval boundary stays gated
+        let settle = pacing_config().ca_pmt_settle;
+        controller.tick(now + pace_step()).unwrap();
+        assert!(!controller.ca_pmt_ready());
+        controller
+            .tick(now + settle + pacing_config().ca_pmt_interval)
+            .unwrap();
+        assert!(!controller.ca_pmt_ready());
+        controller.tick(now + settle + pace_step()).unwrap();
+        assert!(controller.ca_pmt_ready());
+    }
+
+    #[test]
+    fn test_empty_ca_info_does_not_open_ca_pmt_gate() {
+        let (mut controller, mut cam, state) = pair_with(1, pacing_config());
+        let mut now = Instant::now();
+        let caid = 0x0100_u16;
+        let first = pmt_section(100, 1, caid);
+        controller.set_program(&first).unwrap();
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &[]);
+        let _ = drain(&mut controller);
+        assert_eq!(controller.cam_status(0).unwrap(), CamStatus::CaInfo);
+
+        // an empty CAID list never opens the gate: the queued select stays
+        now += pace_step() * 10;
+        controller.tick(now).unwrap();
+        assert!(!controller.ca_pmt_ready());
+        assert!(cam.recv().is_none());
+
+        // a non-empty replacement arms the countdown and the select is
+        // released at the usual pace
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(controller.ca_pmt_ready());
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &first,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+    }
+
+    #[test]
+    fn test_recovery_closes_ca_pmt_gate_and_keeps_queue() {
+        let (mut controller, mut cam, state) = pair_with(1, pacing_config());
+        let mut now = Instant::now();
+        let caid = 0x0100_u16;
+        let first = pmt_section(100, 1, caid);
+        let second = pmt_section(200, 2, caid);
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+
+        controller.set_program(&first).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &first,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        // queue the second program and fail the interface before it is
+        // released: the gate closes, the queued change survives
+        controller.set_program(&second).unwrap();
+        state.lock().unwrap().fail_slot_info = true;
+        assert!(controller.tick(now).is_err());
+        assert!(!controller.ca_pmt_ready());
+        let _ = drain(&mut controller);
+        state.lock().unwrap().fail_slot_info = false;
+
+        // after recovery and a new handshake the retained program is
+        // restored by the unpaced registry synchronization, then the
+        // queued change is released at the usual pace
+        now += pacing_config().retry_interval;
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &first,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(controller.ca_pmt_ready());
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &second,
+                caid,
+                CaPmtListManagement::Add,
                 CaPmtCommand::OkDescrambling,
             )
         );

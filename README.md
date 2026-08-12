@@ -224,7 +224,14 @@ create a thread or own an event loop: integrate its file descriptor into
 the application runtime, drain `poll_event()` when readable and call
 `tick()` from a monotonic timer. A CAM reaches `CamStatus::Ready` after
 valid Application Information and CA Information replies; use `caids()`
-for the deduplicated slot list or `session_caids()` for one CA application:
+for the deduplicated slot list or `session_caids()` for one CA application.
+
+Program changes are paced: `set_program()` and `remove_program()` queue
+the change and `tick()` applies at most one per
+`CiControllerConfig::ca_pmt_interval` (20 s by default) once the CAM has
+confirmed the handshake at least one interval ago - many CAMs ignore or
+reject CA_PMT sent too early or too often. `ca_pmt_ready()` reports when
+the gate is open:
 
 ```rust,no_run
 use std::time::Instant;
@@ -250,7 +257,8 @@ while let Some(event) = ci.poll_event()? {
 }
 
 // A complete raw PMT section, including CRC32. The controller copies all
-// data it needs, so the input buffer may be reused after this call.
+// data it needs, so the input buffer may be reused after this call. The
+// change is queued and applied from tick() at the configured pace.
 let raw_pmt: &[u8] = get_raw_pmt_section();
 let program_number = ci.set_program(raw_pmt)?;
 

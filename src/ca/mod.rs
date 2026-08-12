@@ -23,6 +23,7 @@ mod apdu;
 mod asn1;
 mod capmt;
 mod controller;
+mod pacer;
 mod resource;
 mod session;
 mod spdu;
