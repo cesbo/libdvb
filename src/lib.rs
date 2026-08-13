@@ -21,6 +21,12 @@ pub use ca::{
     CiTransport,
     CiTsDevice,
 };
+#[cfg(feature = "tokio")]
+pub use ca::{
+    CiDriver,
+    CiDriverEvent,
+    CiDriverHandle,
+};
 pub use dvr::DvrDevice;
 pub use fe::{
     ApiVersion,

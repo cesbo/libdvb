@@ -600,6 +600,38 @@ impl CiController {
         self.dispatch_ca_pmt(now)
     }
 
+    // Accessors for the async driver (ca::driver)
+
+    /// Whether the CA link is suspended after a global recovery. While
+    /// suspended the controller does not read the device and `tick` only
+    /// waits for the recovery deadline.
+    #[cfg(feature = "tokio")]
+    pub(super) fn link_suspended(&self) -> bool {
+        self.link_suspended
+    }
+
+    /// Deadline at which a suspended link resumes. `None` while the link
+    /// is not suspended, and also when the suspending CA_RESET failed -
+    /// then no recovery is scheduled and only [`CiController::reset`] can
+    /// resume.
+    #[cfg(feature = "tokio")]
+    pub(super) fn recovery_at(&self) -> Option<Instant> {
+        self.recovery_at
+    }
+
+    /// Timing configuration the controller was created with
+    #[cfg(feature = "tokio")]
+    pub(super) fn config(&self) -> &CiControllerConfig {
+        &self.config
+    }
+
+    /// Queues an already-parsed program select (see
+    /// [`CiController::set_program`])
+    #[cfg(feature = "tokio")]
+    pub(super) fn queue_program(&mut self, program: Program) {
+        self.pacer.push_set(program);
+    }
+
     fn require_active(&self, slot_id: u8) -> Result<()> {
         match self.status(slot_id)? {
             CaSlotStatus::Active => Ok(()),
@@ -1098,8 +1130,11 @@ fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)
 }
 
+/// Socketpair-backed test harness shared by the controller and driver
+/// tests: a mock control plane, a scripted CAM peer and the fixture
+/// constructors around them
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use std::{
         fs::File,
         io::{
@@ -1139,15 +1174,15 @@ mod tests {
         *,
     };
 
-    struct MockState {
-        infos: Vec<CaSlotInfo>,
-        resets: usize,
-        fail_slot_info: bool,
-        fail_reset: bool,
+    pub struct MockState {
+        pub infos: Vec<CaSlotInfo>,
+        pub resets: usize,
+        pub fail_slot_info: bool,
+        pub fail_reset: bool,
     }
 
     #[derive(Clone)]
-    struct MockIo(Arc<Mutex<MockState>>);
+    pub struct MockIo(Arc<Mutex<MockState>>);
 
     impl ControllerIo for MockIo {
         fn reset(&self, _device: &CaDevice) -> Result<()> {
@@ -1169,12 +1204,12 @@ mod tests {
         }
     }
 
-    struct TestCam {
-        file: File,
+    pub struct TestCam {
+        pub file: File,
     }
 
     impl TestCam {
-        fn recv(&mut self) -> Option<Vec<u8>> {
+        pub fn recv(&mut self) -> Option<Vec<u8>> {
             let mut frame = [0; 4096];
             match self.file.read(&mut frame) {
                 Ok(len) => Some(frame[.. len].to_vec()),
@@ -1183,7 +1218,7 @@ mod tests {
             }
         }
 
-        fn send_ctc_reply(&mut self, slot_id: u8, data_pending: bool) {
+        pub fn send_ctc_reply(&mut self, slot_id: u8, data_pending: bool) {
             let t_c_id = slot_id + 1;
             self.file
                 .write_all(&[
@@ -1200,7 +1235,7 @@ mod tests {
                 .unwrap();
         }
 
-        fn send_status(&mut self, slot_id: u8, data_pending: bool) {
+        pub fn send_status(&mut self, slot_id: u8, data_pending: bool) {
             let t_c_id = slot_id + 1;
             self.file
                 .write_all(&[
@@ -1214,11 +1249,11 @@ mod tests {
                 .unwrap();
         }
 
-        fn send_spdu(&mut self, slot_id: u8, spdu: &[u8]) {
+        pub fn send_spdu(&mut self, slot_id: u8, spdu: &[u8]) {
             self.send_spdu_with_pending(slot_id, spdu, false);
         }
 
-        fn send_spdu_with_pending(&mut self, slot_id: u8, spdu: &[u8], data_pending: bool) {
+        pub fn send_spdu_with_pending(&mut self, slot_id: u8, spdu: &[u8], data_pending: bool) {
             let t_c_id = slot_id + 1;
             let mut frame = vec![slot_id, t_c_id, TpduTag::DATA_LAST.raw()];
             asn1::encode(spdu.len() as u16 + 1, &mut frame);
@@ -1233,14 +1268,14 @@ mod tests {
             self.file.write_all(&frame).unwrap();
         }
 
-        fn send_apdu(&mut self, slot_id: u8, session_id: u16, tag: ApduTag, body: &[u8]) {
+        pub fn send_apdu(&mut self, slot_id: u8, session_id: u16, tag: ApduTag, body: &[u8]) {
             let mut payload = spdu::build_session_number(session_id);
             apdu::build(&mut payload, tag, body);
             self.send_spdu(slot_id, &payload);
         }
     }
 
-    fn config() -> CiControllerConfig {
+    pub fn config() -> CiControllerConfig {
         CiControllerConfig {
             slot_status_interval: Duration::ZERO,
             transport_poll_interval: Duration::from_millis(10),
@@ -1255,7 +1290,7 @@ mod tests {
 
     /// Configuration for the CA_PMT pacing tests: the pacing interval is
     /// the only running deadline, everything else is out of reach.
-    fn pacing_config() -> CiControllerConfig {
+    pub fn pacing_config() -> CiControllerConfig {
         CiControllerConfig {
             slot_status_interval: Duration::ZERO,
             transport_poll_interval: Duration::from_secs(3600),
@@ -1268,15 +1303,15 @@ mod tests {
     }
 
     /// One step of the pacing clock: strictly past the interval boundary
-    fn pace_step() -> Duration {
+    pub fn pace_step() -> Duration {
         pacing_config().ca_pmt_interval + Duration::from_millis(1)
     }
 
-    fn pair(slots_num: u8) -> (CiController, TestCam, Arc<Mutex<MockState>>) {
+    pub fn pair(slots_num: u8) -> (CiController, TestCam, Arc<Mutex<MockState>>) {
         pair_with(slots_num, config())
     }
 
-    fn pair_with(
+    pub fn pair_with(
         slots_num: u8,
         config: CiControllerConfig,
     ) -> (CiController, TestCam, Arc<Mutex<MockState>>) {
@@ -1305,11 +1340,11 @@ mod tests {
         (controller, TestCam { file: cam }, state)
     }
 
-    fn set_flags(state: &Arc<Mutex<MockState>>, slot_id: u8, flags: u32) {
+    pub fn set_flags(state: &Arc<Mutex<MockState>>, slot_id: u8, flags: u32) {
         state.lock().unwrap().infos[usize::from(slot_id)].flags = flags;
     }
 
-    fn drain(controller: &mut CiController) -> Vec<CaEvent> {
+    pub fn drain(controller: &mut CiController) -> Vec<CaEvent> {
         let mut events = Vec::new();
         while let Some(event) = controller.poll_event().unwrap() {
             events.push(event);
@@ -1317,7 +1352,7 @@ mod tests {
         events
     }
 
-    fn activate(
+    pub fn activate(
         controller: &mut CiController,
         cam: &mut TestCam,
         state: &Arc<Mutex<MockState>>,
@@ -1347,7 +1382,7 @@ mod tests {
 
     /// The first tick of an Active slot issues the initial transport poll;
     /// acknowledge it so the pacing tests keep the link idle.
-    fn ack_initial_poll(controller: &mut CiController, cam: &mut TestCam, now: Instant) {
+    pub fn ack_initial_poll(controller: &mut CiController, cam: &mut TestCam, now: Instant) {
         controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
@@ -1357,7 +1392,7 @@ mod tests {
         assert_eq!(controller.poll_event().unwrap(), None);
     }
 
-    fn open_resource(
+    pub fn open_resource(
         controller: &mut CiController,
         cam: &mut TestCam,
         slot_id: u8,
@@ -1410,7 +1445,7 @@ mod tests {
         session_id
     }
 
-    fn pmt_section(program_number: u16, version: u8, caid: u16) -> Vec<u8> {
+    pub fn pmt_section(program_number: u16, version: u8, caid: u16) -> Vec<u8> {
         let descriptor = vec![0x09, 0x04, (caid >> 8) as u8, caid as u8, 0xE1, 0xEC];
         PmtBuilder::build(PmtConfig {
             program_number,
@@ -1426,7 +1461,7 @@ mod tests {
             .to_vec()
     }
 
-    fn ca_pmt_frame(
+    pub fn ca_pmt_frame(
         slot_id: u8,
         session_id: u16,
         section: &[u8],
@@ -1443,6 +1478,23 @@ mod tests {
         apdu::build(&mut payload, ApduTag::CA_PMT, &body);
         tpdu::build(slot_id, TpduTag::DATA_LAST, &payload).unwrap()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        super::{
+            ApduTag,
+            capmt::{
+                CaPmtCommand,
+                CaPmtListManagement,
+            },
+            spdu,
+            tpdu,
+        },
+        test_support::*,
+        *,
+    };
 
     #[test]
     fn test_poll_event_is_nonblocking_when_empty() {

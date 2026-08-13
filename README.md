@@ -12,11 +12,13 @@ Supports three types of delivery systems:
 - EN 50494 - Unicable I
 - EN 50607 - Unicable II
 
-DVB-CI (EN 50221) support currently includes a runtime-neutral
-`CiController`, the link, transport and session layers, and Resource
-Manager, Application Information, Conditional Access Support, Host
-Control, Date-Time and high-level MMI resources, including CA PMT program
-selection from raw MPEG-TS PMT sections.
+DVB-CI (EN 50221) support includes a runtime-neutral `CiController`, the
+link, transport and session layers, and Resource Manager, Application
+Information, Conditional Access Support, Host Control, Date-Time and
+high-level MMI resources, including CA PMT program selection from raw
+MPEG-TS PMT sections. The optional `tokio` feature adds `CiDriver` - an
+async event loop that owns a `CiController` and exposes a thread-safe
+command handle, an event stream and a CA_PMT readiness watch.
 
 ## FeDevice
 
@@ -266,6 +268,37 @@ let program_number = ci.set_program(raw_pmt)?;
 ci.remove_program(program_number)?;
 
 # Ok::<(), libdvb::error::Error>(())
+```
+
+### Async driver (feature `tokio`)
+
+With the `tokio` feature, `CiDriver` owns the event loop: it waits for CA
+link frames, computes its own `tick` deadlines, sits out a suspended link
+without polling the descriptor, and retries a failed global `CA_RESET`
+internally until it succeeds. Spawn the future on your runtime; the
+library never spawns tasks or owns a runtime. Commands may be sent from
+any thread through the cloneable handle; CA_PMT pacing and the readiness
+gate behave exactly as in the externally driven mode. Dropping every
+handle (or calling `shutdown()`) stops the loop and closes the device.
+
+```rust,no_run
+use libdvb::{CiController, CiDriver, CiDriverEvent};
+
+let controller = CiController::open(0, 0)?;
+let (driver, handle, mut events) = CiDriver::new(controller);
+let ready = handle.ready_watch();   // watch::Receiver<bool>
+
+runtime.spawn(driver.run());
+
+// Program changes from any thread; validation is synchronous.
+let program_number = handle.set_program(get_raw_pmt_section())?;
+
+while let Some(event) = events.recv().await {
+    match event {
+        CiDriverEvent::Ca(event) => println!("CI: {event:?}"),
+        event => println!("CI driver: {event:?}"),
+    }
+}
 ```
 
 ## File Descriptors

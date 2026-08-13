@@ -40,6 +40,25 @@ fn auto_traits() {
     assert_send_sync::<libdvb::CiController>();
 }
 
+#[cfg(feature = "tokio")]
+#[test]
+fn ci_driver_types_are_send_sync() {
+    fn assert_send<T: Send>() {}
+    fn assert_send_sync_clone<T: Send + Sync + Clone>() {}
+    assert_send::<libdvb::CiDriver>();
+    assert_send_sync_clone::<libdvb::CiDriverHandle>();
+    assert_send::<libdvb::CiDriverEvent>();
+}
+
+/// Compile-only: the driver future must be spawnable on a multi-thread
+/// runtime
+#[cfg(feature = "tokio")]
+#[allow(dead_code)]
+fn assert_spawnable(driver: libdvb::CiDriver) {
+    fn is_send<F: Future + Send>(_: F) {}
+    is_send(driver.run());
+}
+
 #[test]
 fn ca() {
     // struct ca_slot_info

@@ -23,6 +23,8 @@ mod apdu;
 mod asn1;
 mod capmt;
 mod controller;
+#[cfg(feature = "tokio")]
+mod driver;
 mod pacer;
 mod resource;
 mod session;
@@ -57,6 +59,12 @@ use std::{
     },
 };
 
+#[cfg(feature = "tokio")]
+pub use self::driver::{
+    CiDriver,
+    CiDriverEvent,
+    CiDriverHandle,
+};
 use self::sys::*;
 pub use self::{
     apdu::ApduTag,

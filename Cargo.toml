@@ -1,6 +1,6 @@
 [package]
 name = "libdvb"
-version = "0.8.0"
+version = "0.9.0"
 description = "Interface for DVB-API v5 devices in Linux"
 authors = ["Cesbo Developers Team <info@cesbo.com>"]
 license = "MIT"
@@ -16,3 +16,13 @@ bitflags = "2"
 libmpegts = "0.3.8"
 nix = { version = "0.31", features = ["ioctl"] }
 thiserror = "2"
+tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional = true }
+
+[features]
+tokio = ["dep:tokio"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["net", "time", "sync", "macros", "rt", "test-util"] }
+
+[package.metadata.docs.rs]
+all-features = true
