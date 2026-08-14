@@ -5,9 +5,9 @@ pub mod error;
 pub mod fe;
 pub mod net;
 pub mod scan;
+pub mod sysfs;
 
 mod fd;
-mod sysfs;
 
 pub use ca::{
     CaDevice,

@@ -92,13 +92,12 @@ impl CiTsDevice {
             Ok((fd_in, fd_out))
         };
 
-        let (fd_in, fd_out) = match try_open(&ci_path) {
-            Err(ref e) if e.kind() == io::ErrorKind::NotFound => try_open(&sec_path)?,
-            result => result?,
+        let (kind, (fd_in, fd_out)) = match try_open(&ci_path) {
+            Err(ref e) if e.kind() == io::ErrorKind::NotFound => ("sec", try_open(&sec_path)?),
+            result => ("ci", result?),
         };
 
-        let vendor_id = crate::sysfs::read_hex_attr(&fd_out, "vendor");
-        let device_id = crate::sysfs::read_hex_attr(&fd_out, "device");
+        let (vendor_id, device_id) = crate::sysfs::pci_ids(kind, adapter, device);
 
         Ok(CiTsDevice {
             fd_in,

@@ -250,6 +250,8 @@ impl FeDevice {
         let path = format!("/dev/dvb/adapter{}/frontend{}", adapter, device);
         let file = OpenOptions::new().read(true).write(is_write).open(&path)?;
 
+        let (vendor_id, device_id) = sysfs::pci_ids("frontend", adapter, device);
+
         let mut fe = FeDevice {
             file,
 
@@ -261,14 +263,11 @@ impl FeDevice {
             symbolrate_range: 0 .. 0,
             caps: FeCaps::empty(),
 
-            vendor_id: None,
-            device_id: None,
+            vendor_id,
+            device_id,
         };
 
         fe.get_info()?;
-
-        fe.vendor_id = sysfs::read_hex_attr(&fe.file, "vendor");
-        fe.device_id = sysfs::read_hex_attr(&fe.file, "device");
 
         Ok(fe)
     }

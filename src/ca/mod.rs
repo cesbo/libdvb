@@ -134,8 +134,7 @@ impl CaDevice {
             .custom_flags(::nix::libc::O_NONBLOCK)
             .open(&path)?;
 
-        let vendor_id = sysfs::read_hex_attr(&file, "vendor");
-        let device_id = sysfs::read_hex_attr(&file, "device");
+        let (vendor_id, device_id) = sysfs::pci_ids("ca", adapter, device);
 
         Ok(CaDevice {
             adapter,
