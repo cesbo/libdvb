@@ -34,7 +34,10 @@ use std::{
 
 use crate::{
     error::Result,
-    fe::sys::DtvPropertyRaw,
+    fe::sys::{
+        DtvProperties,
+        DtvPropertyRaw,
+    },
 };
 
 /// TBS vendor id (`/sys/class/dvb/dvbN.secN/device/vendor`)
@@ -141,12 +144,6 @@ impl CiTsDevice {
     pub fn set_input_bitrate(&self, bitrate: u32) -> Result<()> {
         if !matches!(self.vendor_id, Some(VENDOR_TBS)) {
             return Ok(());
-        }
-
-        #[repr(C)]
-        struct DtvProperties {
-            num: u32,
-            props: *mut DtvPropertyRaw,
         }
 
         let mut props = [DtvPropertyRaw::new(MODULATOR_INPUT_BITRATE, bitrate)];

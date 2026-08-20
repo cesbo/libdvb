@@ -134,13 +134,6 @@ impl fmt::Display for ApiVersion {
     }
 }
 
-/// `dtv_properties` ioctl argument: a count plus a pointer to a property array.
-#[repr(C)]
-struct DtvProperties {
-    num: u32,
-    props: *mut DtvPropertyRaw,
-}
-
 /// A reference to the frontend device and device information
 #[derive(Debug)]
 pub struct FeDevice {

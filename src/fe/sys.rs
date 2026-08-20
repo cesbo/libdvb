@@ -1114,6 +1114,13 @@ pub const DTV_MAX_COMMAND: u32 = DTV_INPUT;
 /// num of properties cannot exceed DTV_IOCTL_MAX_MSGS per ioctl
 pub const DTV_IOCTL_MAX_MSGS: usize = 64;
 
+/// `dtv_properties` ioctl argument: a count plus a pointer to a property array.
+#[repr(C)]
+pub struct DtvProperties {
+    pub num: u32,
+    pub props: *mut DtvPropertyRaw,
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub struct FeParameters {
