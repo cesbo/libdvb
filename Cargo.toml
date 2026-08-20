@@ -18,10 +18,20 @@ nix = { version = "0.31", features = ["ioctl"] }
 thiserror = "2"
 tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional = true }
 
+[[example]]
+name = "camenu"
+# the example carries unit tests for its input validation
+test = true
+
 [features]
 tokio = ["dep:tokio"]
 
 [dev-dependencies]
+# the camenu example waits on the CI and the terminal with poll(2), hides the
+# input of a blind PIN enquiry and leaves the dialogue on a signal
+nix = { version = "0.31", features = ["fs", "poll", "signal", "term"] }
+# decodes the EN 300 468 annex A strings of the CAM menu
+textcode = "0.3"
 tokio = { version = "1", features = ["net", "time", "sync", "macros", "rt", "test-util"] }
 
 [package.metadata.docs.rs]
