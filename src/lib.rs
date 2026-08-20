@@ -3,6 +3,7 @@ pub mod dmx;
 pub mod dvr;
 pub mod error;
 pub mod fe;
+pub mod modulator;
 pub mod net;
 pub mod scan;
 pub mod sysfs;
