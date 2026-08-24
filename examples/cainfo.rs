@@ -1,6 +1,6 @@
 //! Report the CAM of a CI adapter and exit
 //!
-//! Usage: caminfo [-h] <adapter> [device]
+//! Usage: cainfo [-h] <adapter> [device]
 //!
 //! Opens /dev/dvb/adapterN/caM, prints the CA device capabilities, brings
 //! the en50221 stack up and waits for the inserted CAMs to identify
@@ -64,12 +64,12 @@ const ABSENT_GRACE: Duration = Duration::from_secs(2);
 const IDENTIFY_LIMIT: Duration = Duration::from_secs(30);
 
 const USAGE: &str = "\
-Usage: caminfo [OPTIONS] <adapter> [device]
+Usage: cainfo [OPTIONS] <adapter> [device]
 
 Reports the CAM of a DVB CI adapter (/dev/dvb/adapterN/caM): the device
 capabilities, the application info and the CA systems each inserted module
 supports. Opening the adapter resets its CI interface: every CAM restarts
-and stops descrambling while caminfo runs.
+and stops descrambling while cainfo runs.
 
 Options:
     -h, --help    print this text and exit
@@ -218,7 +218,7 @@ fn wait(ci: &CiController) {
     match poll(&mut fds, PollTimeout::from(TICK_MS)) {
         Ok(_) | Err(Errno::EINTR) => {}
         Err(e) => {
-            eprintln!("caminfo: poll: {e}");
+            eprintln!("cainfo: poll: {e}");
             // a broken poll must not turn the loop into a spin
             std::thread::sleep(Duration::from_millis(u64::from(TICK_MS)));
         }
@@ -235,7 +235,7 @@ fn collect(ci: &mut CiController) {
         wait(ci);
 
         if let Err(e) = ci.tick(Instant::now()) {
-            eprintln!("caminfo: tick: {e}");
+            eprintln!("cainfo: tick: {e}");
         }
 
         loop {
@@ -243,7 +243,7 @@ fn collect(ci: &mut CiController) {
                 Ok(Some(_)) => {}
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!("caminfo: {e}");
+                    eprintln!("cainfo: {e}");
                     break;
                 }
             }
@@ -257,7 +257,7 @@ fn collect(ci: &mut CiController) {
 
         if elapsed >= IDENTIFY_LIMIT {
             eprintln!(
-                "caminfo: not every module identified itself within {}s; \
+                "cainfo: not every module identified itself within {}s; \
                  reporting what arrived",
                 IDENTIFY_LIMIT.as_secs()
             );
@@ -272,7 +272,7 @@ fn report(ci: &CiController) {
         let status = match ci.status(slot_id) {
             Ok(status) => status,
             Err(e) => {
-                eprintln!("caminfo: slot {slot_id}: {e}");
+                eprintln!("cainfo: slot {slot_id}: {e}");
                 continue;
             }
         };
@@ -305,7 +305,7 @@ fn report(ci: &CiController) {
         match ci.caids(slot_id) {
             Ok(caids) if caids.is_empty() => println!("    CA system ids: none reported"),
             Ok(caids) => println!("    CA system ids: {caids:04X?}"),
-            Err(e) => eprintln!("caminfo: slot {slot_id}: {e}"),
+            Err(e) => eprintln!("cainfo: slot {slot_id}: {e}"),
         }
     }
 }
@@ -339,7 +339,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("caminfo: {e}");
+            eprintln!("cainfo: {e}");
             ExitCode::FAILURE
         }
     }

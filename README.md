@@ -270,7 +270,7 @@ ci.remove_program(program_number)?;
 # Ok::<(), libdvb::error::Error>(())
 ```
 
-Two runnable examples cover the CI stack: `examples/caminfo.rs` waits for
+Two runnable examples cover the CI stack: `examples/cainfo.rs` waits for
 the inserted CAMs to identify themselves, prints everything found and
 leaves; `examples/camenu.rs` gives interactive line-oriented access to the
 CAM menu.

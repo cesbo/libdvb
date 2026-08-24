@@ -22,7 +22,7 @@ tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional 
 tokio = ["dep:tokio"]
 
 [dev-dependencies]
-# the caminfo and camenu examples wait on the CI descriptor with poll(2)
+# the cainfo and camenu examples wait on the CI descriptor with poll(2)
 nix = { version = "0.31", features = ["poll"] }
 # decodes the EN 300 468 annex A strings of the CAM menu
 textcode = "0.3"
