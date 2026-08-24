@@ -1,7 +1,7 @@
 //! EN 50221 CA_PMT coding from an MPEG-TS PMT section.
 
 use libmpegts::psi::{
-    CaDescriptorRef,
+    Desc09Ref,
     DescriptorsRef,
     PmtSectionRef,
 };
@@ -131,11 +131,11 @@ fn parse_ca_descriptors(
                 "invalid descriptor in PMT program {program_number}: {error}"
             ))
         })?;
-        if descriptor.tag() != CaDescriptorRef::TAG {
+        if descriptor.tag() != Desc09Ref::TAG {
             continue;
         }
 
-        let ca = CaDescriptorRef::try_from(descriptor).map_err(|error| {
+        let ca = Desc09Ref::try_from(descriptor).map_err(|error| {
             Error::InvalidData(format!(
                 "invalid CA descriptor in PMT program {program_number}: {error}"
             ))

@@ -38,6 +38,7 @@ use libdvb::{
         CA_SC,
     },
 };
+use libmpegts::utils::textcode::TextcodeRef;
 use nix::{
     errno::Errno,
     poll::{
@@ -169,6 +170,16 @@ fn application_type_name(application_type: u8) -> &'static str {
     }
 }
 
+/// Decodes a DVB-coded string (EN 300 468 annex A); the bytes are shown as
+/// lossy UTF-8 when the module names a character table the decoder does not
+/// know
+fn decode_text(data: &[u8]) -> String {
+    match TextcodeRef::try_from(data) {
+        Ok(text) => text.to_string(),
+        Err(_) => String::from_utf8_lossy(data).into_owned(),
+    }
+}
+
 /// The capabilities the CA device reports before the stack comes up
 fn print_device(device: &CaDevice) -> Result<(), Box<dyn Error>> {
     println!(
@@ -287,10 +298,7 @@ fn report(ci: &CiController) {
 
         match ci.app_info(slot_id) {
             Some(info) => {
-                println!(
-                    "    menu string: {}",
-                    textcode::dvb::decode(&info.menu_string)
-                );
+                println!("    menu string: {}", decode_text(&info.menu_string));
                 println!(
                     "    application type: 0x{:02X}{}",
                     info.application_type,

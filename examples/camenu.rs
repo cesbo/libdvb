@@ -44,6 +44,7 @@ use libdvb::{
         ResourceId,
     },
 };
+use libmpegts::utils::textcode::TextcodeRef;
 use nix::{
     errno::Errno,
     poll::{
@@ -169,7 +170,7 @@ impl App {
             CaEvent::ApplicationInfo { slot_id, info } => {
                 println!(
                     "CI slot {slot_id}: CAM {:?}",
-                    textcode::dvb::decode(&info.menu_string)
+                    decode_text(&info.menu_string)
                 );
                 self.enter_menu_once(slot_id);
             }
@@ -359,10 +360,20 @@ fn item_count(menu: &MmiMenu) -> u8 {
     }
 }
 
+/// Decodes a DVB-coded string (EN 300 468 annex A); the bytes are shown as
+/// lossy UTF-8 when the module names a character table the decoder does not
+/// know
+fn decode_text(data: &[u8]) -> String {
+    match TextcodeRef::try_from(data) {
+        Ok(text) => text.to_string(),
+        Err(_) => String::from_utf8_lossy(data).into_owned(),
+    }
+}
+
 /// Prints DVB text under a fixed indent, keeping the line breaks the module
 /// put in it
 fn print_text(indent: &str, data: &[u8]) {
-    let decoded = textcode::dvb::decode(data);
+    let decoded = decode_text(data);
 
     if decoded.is_empty() {
         return;
@@ -388,7 +399,7 @@ fn print_menu(kind: &str, slot_id: u8, menu: &MmiMenu) {
     }
 
     for (index, item) in menu.items.iter().enumerate() {
-        let decoded = textcode::dvb::decode(item);
+        let decoded = decode_text(item);
         let mut lines = decoded.split('\n');
         println!("    {:2}. {}", index + 1, lines.next().unwrap_or_default());
 

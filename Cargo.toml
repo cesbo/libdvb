@@ -13,7 +13,7 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2"
-libmpegts = "0.3.8"
+libmpegts = "0.5.1"
 nix = { version = "0.31", features = ["ioctl"] }
 thiserror = "2"
 tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional = true }
@@ -24,8 +24,6 @@ tokio = ["dep:tokio"]
 [dev-dependencies]
 # the cainfo and camenu examples wait on the CI descriptor with poll(2)
 nix = { version = "0.31", features = ["poll"] }
-# decodes the EN 300 468 annex A strings of the CAM menu
-textcode = "0.3"
 tokio = { version = "1", features = ["net", "time", "sync", "macros", "rt", "test-util"] }
 
 [package.metadata.docs.rs]
