@@ -1,6 +1,6 @@
 //! Interactive access to the CAM menu of a CI adapter
 //!
-//! Usage: camenu [-h] <adapter> [device]
+//! Usage: camenu [adapter] [device]  (both default to 0)
 //!
 //! Opens /dev/dvb/adapterN/caM and asks the inserted CAM to open its menu
 //! once the module identifies itself. The menu is printed with numbered
@@ -27,7 +27,6 @@ use std::{
         BufRead,
         Write,
     },
-    process::ExitCode,
     sync::mpsc,
     thread,
     time::{
@@ -51,20 +50,6 @@ use libmpegts::utils::textcode::TextcodeRef;
 /// `poll_event()` never block, so a plain sleep loop is enough; watching the
 /// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
 const TICK: Duration = Duration::from_millis(50);
-
-const USAGE: &str = "\
-Usage: camenu [OPTIONS] <adapter> [device]
-
-Interactive access to the CAM menu of a DVB CI adapter (/dev/dvb/adapterN/caM).
-The menu of the inserted CAM opens by itself; a typed line answers the open
-dialogue: an item number answers the menu (0 cancels), any text answers an
-enquiry (an empty line cancels), an empty line closes a list, and q leaves.
-Opening the adapter resets its CI interface: every CAM restarts and stops
-descrambling while camenu runs.
-
-Options:
-    -h, --help    print this text and exit
-";
 
 /// What the open dialogue expects as its answer
 #[derive(Clone, Copy)]
@@ -351,14 +336,12 @@ fn item_count(menu: &MmiMenu) -> u8 {
     }
 }
 
-/// Decodes a DVB-coded string (EN 300 468 annex A); the bytes are shown as
-/// lossy UTF-8 when the module names a character table the decoder does not
-/// know
+/// Decodes a DVB-coded string (EN 300 468 annex A); an undecodable string
+/// shows as empty
 fn decode_text(data: &[u8]) -> String {
-    match TextcodeRef::try_from(data) {
-        Ok(text) => text.to_string(),
-        Err(_) => String::from_utf8_lossy(data).into_owned(),
-    }
+    TextcodeRef::try_from(data)
+        .map(|v| v.to_string())
+        .unwrap_or_default()
 }
 
 /// Prints DVB text under a fixed indent, keeping the line breaks the module
@@ -408,53 +391,18 @@ fn log_error(result: libdvb::error::Result<()>) {
     }
 }
 
-struct Args {
-    adapter: u32,
-    device: u32,
-}
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut args = std::env::args().skip(1);
+    let adapter: u32 = args
+        .next()
+        .map(|v| v.parse().expect("invalid adapter value"))
+        .unwrap_or(0);
+    let device: u32 = args
+        .next()
+        .map(|v| v.parse().expect("invalid device value"))
+        .unwrap_or(0);
 
-/// Reads the command line; `None` means the usage was asked for and printed
-fn parse_args() -> Result<Option<Args>, String> {
-    let mut numbers = Vec::new();
-
-    for argument in std::env::args().skip(1) {
-        match argument.as_str() {
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return Ok(None);
-            }
-            option if option.starts_with('-') => {
-                return Err(format!("unknown option {option:?}\n\n{USAGE}"));
-            }
-            number => match number.parse::<u32>() {
-                Ok(number) if numbers.len() < 2 => numbers.push(number),
-                Ok(_) => return Err(format!("too many arguments\n\n{USAGE}")),
-                Err(_) => return Err(format!("{number:?} is not a device number\n\n{USAGE}")),
-            },
-        }
-    }
-
-    match numbers.as_slice() {
-        [adapter] => Ok(Some(Args {
-            adapter: *adapter,
-            device: 0,
-        })),
-        [adapter, device] => Ok(Some(Args {
-            adapter: *adapter,
-            device: *device,
-        })),
-        _ => Err(format!("the adapter number is required\n\n{USAGE}")),
-    }
-}
-
-fn run() -> Result<(), Box<dyn Error>> {
-    let Some(args) = parse_args()? else {
-        return Ok(());
-    };
-
-    let (adapter, device) = (args.adapter, args.device);
-    let ci = CiController::open(adapter, device)
-        .map_err(|e| format!("/dev/dvb/adapter{adapter}/ca{device}: {e}"))?;
+    let ci = CiController::open(adapter, device)?;
     println!(
         "CI adapter {adapter}, device {device}: {} slot(s)",
         ci.slots_num()
@@ -514,14 +462,4 @@ fn run() -> Result<(), Box<dyn Error>> {
     app.close_mmi_sessions();
 
     Ok(())
-}
-
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("camenu: {e}");
-            ExitCode::FAILURE
-        }
-    }
 }

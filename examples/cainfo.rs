@@ -1,6 +1,6 @@
 //! Report the CAM of a CI adapter and exit
 //!
-//! Usage: cainfo [-h] <adapter> [device]
+//! Usage: cainfo [adapter] [device]  (both default to 0)
 //!
 //! Opens /dev/dvb/adapterN/caM, prints the CA device capabilities, brings
 //! the en50221 stack up and waits for the inserted CAMs to identify
@@ -14,7 +14,6 @@
 
 use std::{
     error::Error,
-    process::ExitCode,
     thread::sleep,
     time::{
         Duration,
@@ -53,57 +52,6 @@ const ABSENT_GRACE: Duration = Duration::from_secs(2);
 /// How long a module may take to identify itself after the reset before the
 /// report goes out without it; a CAM regularly takes 10-20 seconds to boot
 const IDENTIFY_LIMIT: Duration = Duration::from_secs(30);
-
-const USAGE: &str = "\
-Usage: cainfo [OPTIONS] <adapter> [device]
-
-Reports the CAM of a DVB CI adapter (/dev/dvb/adapterN/caM): the device
-capabilities, the application info and the CA systems each inserted module
-supports. Opening the adapter resets its CI interface: every CAM restarts
-and stops descrambling while cainfo runs.
-
-Options:
-    -h, --help    print this text and exit
-";
-
-struct Args {
-    adapter: u32,
-    device: u32,
-}
-
-/// Reads the command line; `None` means the usage was asked for and printed
-fn parse_args() -> Result<Option<Args>, String> {
-    let mut numbers = Vec::new();
-
-    for argument in std::env::args().skip(1) {
-        match argument.as_str() {
-            "-h" | "--help" => {
-                print!("{USAGE}");
-                return Ok(None);
-            }
-            option if option.starts_with('-') => {
-                return Err(format!("unknown option {option:?}\n\n{USAGE}"));
-            }
-            number => match number.parse::<u32>() {
-                Ok(number) if numbers.len() < 2 => numbers.push(number),
-                Ok(_) => return Err(format!("too many arguments\n\n{USAGE}")),
-                Err(_) => return Err(format!("{number:?} is not a device number\n\n{USAGE}")),
-            },
-        }
-    }
-
-    match numbers.as_slice() {
-        [adapter] => Ok(Some(Args {
-            adapter: *adapter,
-            device: 0,
-        })),
-        [adapter, device] => Ok(Some(Args {
-            adapter: *adapter,
-            device: *device,
-        })),
-        _ => Err(format!("the adapter number is required\n\n{USAGE}")),
-    }
-}
 
 /// Names the ca_slot_type bits of CA_GET_CAP
 fn slot_type_names(slot_type: u32) -> String {
@@ -160,14 +108,12 @@ fn application_type_name(application_type: u8) -> &'static str {
     }
 }
 
-/// Decodes a DVB-coded string (EN 300 468 annex A); the bytes are shown as
-/// lossy UTF-8 when the module names a character table the decoder does not
-/// know
+/// Decodes a DVB-coded string (EN 300 468 annex A); an undecodable string
+/// shows as empty
 fn decode_text(data: &[u8]) -> String {
-    match TextcodeRef::try_from(data) {
-        Ok(text) => text.to_string(),
-        Err(_) => String::from_utf8_lossy(data).into_owned(),
-    }
+    TextcodeRef::try_from(data)
+        .map(|v| v.to_string())
+        .unwrap_or_default()
 }
 
 /// The capabilities the CA device reports before the stack comes up
@@ -294,14 +240,18 @@ fn report(ci: &CiController) {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
-    let Some(args) = parse_args()? else {
-        return Ok(());
-    };
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut args = std::env::args().skip(1);
+    let adapter: u32 = args
+        .next()
+        .map(|v| v.parse().expect("invalid adapter value"))
+        .unwrap_or(0);
+    let device: u32 = args
+        .next()
+        .map(|v| v.parse().expect("invalid device value"))
+        .unwrap_or(0);
 
-    let (adapter, device) = (args.adapter, args.device);
-    let device = CaDevice::open(adapter, device)
-        .map_err(|e| format!("/dev/dvb/adapter{adapter}/ca{device}: {e}"))?;
+    let device = CaDevice::open(adapter, device)?;
 
     // printed before the controller takes the device: a CA device without
     // the CI link interface still gets its capabilities reported
@@ -317,14 +267,4 @@ fn run() -> Result<(), Box<dyn Error>> {
     report(&ci);
 
     Ok(())
-}
-
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("cainfo: {e}");
-            ExitCode::FAILURE
-        }
-    }
 }
