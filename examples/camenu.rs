@@ -11,8 +11,10 @@
 //! - an empty line closes an open list
 //! - q leaves
 //!
-//! The controller is driven from a plain poll(2) loop; the terminal is read
-//! from a thread, so the CI polling never waits for the user.
+//! The controller is driven from a plain sleep loop - `tick()` and
+//! `poll_event()` never block - and the terminal is read from a thread, so
+//! the loop never waits for the user. Watching the CA descriptor (`as_fd`)
+//! with poll(2) instead would only cut the latency.
 //!
 //! Note that opening the controller resets the CI interface of the adapter
 //! (`CiController::open` issues CA_RESET), so every CAM of the adapter
@@ -25,7 +27,6 @@ use std::{
         BufRead,
         Write,
     },
-    os::fd::AsFd,
     process::ExitCode,
     sync::mpsc,
     thread,
@@ -45,21 +46,11 @@ use libdvb::{
     },
 };
 use libmpegts::utils::textcode::TextcodeRef;
-use nix::{
-    errno::Errno,
-    poll::{
-        PollFd,
-        PollFlags,
-        PollTimeout,
-        poll,
-    },
-};
 
-/// How long the loop waits before driving the controller again. The default
-/// `CiControllerConfig::transport_poll_interval` is the shortest period the
-/// controller needs a tick at; CI data arrives as a wake-up rather than at
-/// this rate.
-const TICK_MS: u16 = 100;
+/// How long the loop sleeps between the controller ticks. `tick()` and
+/// `poll_event()` never block, so a plain sleep loop is enough; watching the
+/// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
+const TICK: Duration = Duration::from_millis(50);
 
 const USAGE: &str = "\
 Usage: camenu [OPTIONS] <adapter> [device]
@@ -417,21 +408,6 @@ fn log_error(result: libdvb::error::Result<()>) {
     }
 }
 
-/// Waits for CI data or for the tick deadline; user input arrives through
-/// the channel and is picked up on the next pass
-fn wait(ci: &CiController) {
-    let mut fds = [PollFd::new(ci.as_fd(), PollFlags::POLLIN)];
-
-    match poll(&mut fds, PollTimeout::from(TICK_MS)) {
-        Ok(_) | Err(Errno::EINTR) => {}
-        Err(e) => {
-            eprintln!("camenu: poll: {e}");
-            // a broken poll must not turn the loop into a spin
-            std::thread::sleep(Duration::from_millis(u64::from(TICK_MS)));
-        }
-    }
-}
-
 struct Args {
     adapter: u32,
     device: u32,
@@ -500,8 +476,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let mut app = App::new(ci);
 
     'running: loop {
-        wait(&app.ci);
-
         if let Err(e) = app.ci.tick(Instant::now()) {
             eprintln!("camenu: tick: {e}");
         }
@@ -533,6 +507,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         // stdout is not a terminal when the output is redirected: the menu
         // must not sit in the buffer while the user waits for it
         let _ = io::stdout().flush();
+
+        thread::sleep(TICK);
     }
 
     app.close_mmi_sessions();

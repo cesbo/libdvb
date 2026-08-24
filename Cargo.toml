@@ -22,8 +22,6 @@ tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional 
 tokio = ["dep:tokio"]
 
 [dev-dependencies]
-# the cainfo and camenu examples wait on the CI descriptor with poll(2)
-nix = { version = "0.31", features = ["poll"] }
 tokio = { version = "1", features = ["net", "time", "sync", "macros", "rt", "test-util"] }
 
 [package.metadata.docs.rs]

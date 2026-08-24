@@ -14,8 +14,8 @@
 
 use std::{
     error::Error,
-    os::fd::AsFd,
     process::ExitCode,
+    thread::sleep,
     time::{
         Duration,
         Instant,
@@ -39,21 +39,11 @@ use libdvb::{
     },
 };
 use libmpegts::utils::textcode::TextcodeRef;
-use nix::{
-    errno::Errno,
-    poll::{
-        PollFd,
-        PollFlags,
-        PollTimeout,
-        poll,
-    },
-};
 
-/// How long the loop waits before driving the controller again. The default
-/// `CiControllerConfig::transport_poll_interval` is the shortest period the
-/// controller needs a tick at; CI data arrives as a wake-up rather than at
-/// this rate.
-const TICK_MS: u16 = 100;
+/// How long the loop sleeps between the controller ticks. `tick()` and
+/// `poll_event()` never block, so a plain sleep loop is enough; watching the
+/// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
+const TICK: Duration = Duration::from_millis(50);
 
 /// How long a slot may stay unreported before it counts as empty: the
 /// controller reads the physical slot state within its first
@@ -222,20 +212,6 @@ fn all_settled(ci: &CiController, elapsed: Duration) -> bool {
     )
 }
 
-/// Waits for CI data or for the tick deadline
-fn wait(ci: &CiController) {
-    let mut fds = [PollFd::new(ci.as_fd(), PollFlags::POLLIN)];
-
-    match poll(&mut fds, PollTimeout::from(TICK_MS)) {
-        Ok(_) | Err(Errno::EINTR) => {}
-        Err(e) => {
-            eprintln!("cainfo: poll: {e}");
-            // a broken poll must not turn the loop into a spin
-            std::thread::sleep(Duration::from_millis(u64::from(TICK_MS)));
-        }
-    }
-}
-
 /// Drives the controller until every slot settles or the deadline passes.
 /// The events are not the report - the final state queried afterwards is -
 /// but the queue has to be drained for the controller to make progress.
@@ -243,8 +219,6 @@ fn collect(ci: &mut CiController) {
     let started = Instant::now();
 
     loop {
-        wait(ci);
-
         if let Err(e) = ci.tick(Instant::now()) {
             eprintln!("cainfo: tick: {e}");
         }
@@ -274,6 +248,8 @@ fn collect(ci: &mut CiController) {
             );
             return;
         }
+
+        sleep(TICK);
     }
 }
 
