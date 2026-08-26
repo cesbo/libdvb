@@ -30,6 +30,7 @@ mod resource;
 mod session;
 mod spdu;
 pub mod sys;
+mod text;
 mod tpdu;
 mod transport;
 pub mod ts;
@@ -84,6 +85,7 @@ pub use self::{
         CaEvent,
         CiSession,
     },
+    text::DvbText,
     tpdu::TpduTag,
     transport::{
         CiTransport,

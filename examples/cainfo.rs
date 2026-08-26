@@ -27,7 +27,6 @@ use libdvb::{
     CamStatus,
     CiController,
 };
-use libmpegts::utils::textcode::TextcodeRef;
 
 /// How long the loop sleeps between the controller ticks. `tick()` and
 /// `poll_event()` never block, so a plain sleep loop is enough; watching the
@@ -50,14 +49,6 @@ fn application_type_name(application_type: u8) -> &'static str {
         0x02 => " (Electronic Programme Guide)",
         _ => "",
     }
-}
-
-/// Decodes a DVB-coded string (EN 300 468 annex A); an undecodable string
-/// shows as empty
-fn decode_text(data: &[u8]) -> String {
-    TextcodeRef::try_from(data)
-        .map(|v| v.to_string())
-        .unwrap_or_default()
 }
 
 /// The capabilities the CA device reports before the stack comes up
@@ -164,7 +155,7 @@ fn report(ci: &CiController) {
 
         match ci.app_info(slot_id) {
             Some(info) => {
-                println!("    menu string: {}", decode_text(&info.menu_string));
+                println!("    menu string: {}", info.menu_string);
                 println!(
                     "    application type: 0x{:02X}{}",
                     info.application_type,

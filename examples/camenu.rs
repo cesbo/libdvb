@@ -40,11 +40,11 @@ use libdvb::{
     CaSlotStatus,
     CiController,
     ca::{
+        DvbText,
         MmiMenu,
         ResourceId,
     },
 };
-use libmpegts::utils::textcode::TextcodeRef;
 
 /// How long the loop sleeps between the controller ticks. `tick()` and
 /// `poll_event()` never block, so a plain sleep loop is enough; watching the
@@ -144,10 +144,7 @@ impl App {
                 }
             }
             CaEvent::ApplicationInfo { slot_id, info } => {
-                println!(
-                    "CI slot {slot_id}: CAM {:?}",
-                    decode_text(&info.menu_string)
-                );
+                println!("CI slot {slot_id}: CAM {:?}", info.menu_string);
                 self.enter_menu_once(slot_id);
             }
             CaEvent::SessionOpened {
@@ -301,18 +298,10 @@ impl App {
     }
 }
 
-/// Decodes a DVB-coded string (EN 300 468 annex A); an undecodable string
-/// shows as empty
-fn decode_text(data: &[u8]) -> String {
-    TextcodeRef::try_from(data)
-        .map(|v| v.to_string())
-        .unwrap_or_default()
-}
-
 /// Prints DVB text under a fixed indent, keeping the line breaks the module
 /// put in it
-fn print_text(indent: &str, data: &[u8]) {
-    let decoded = decode_text(data);
+fn print_text(indent: &str, text: &DvbText) {
+    let decoded = text.to_string();
 
     if decoded.is_empty() {
         return;
@@ -338,7 +327,7 @@ fn print_menu(kind: &str, slot_id: u8, menu: &MmiMenu) {
     }
 
     for (index, item) in menu.items.iter().enumerate() {
-        let decoded = decode_text(item);
+        let decoded = item.to_string();
         let mut lines = decoded.split('\n');
         println!("    {:2}. {}", index + 1, lines.next().unwrap_or_default());
 

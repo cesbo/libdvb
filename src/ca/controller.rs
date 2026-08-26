@@ -1871,7 +1871,10 @@ mod tests {
             controller.cam_status(0).unwrap(),
             CamStatus::ApplicationInfo
         );
-        assert_eq!(controller.app_info(0).unwrap().menu_string, b"CAM");
+        assert_eq!(
+            controller.app_info(0).unwrap().menu_string.as_bytes(),
+            b"CAM"
+        );
 
         set_flags(&state, 0, 0);
         controller.tick(now).unwrap();
