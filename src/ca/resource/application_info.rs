@@ -24,12 +24,25 @@ use crate::error::{
 /// en50221 8.4.2.2: application_info object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplicationInfo {
-    /// en50221 Table 61: 0x01 - Conditional Access, 0x02 - EPG
+    /// en50221 Table 61 value, named by
+    /// [`ApplicationInfo::application_type_name`]
     pub application_type: u8,
     pub application_manufacturer: u16,
     pub manufacturer_code: u16,
     /// application name
     pub menu_string: DvbText,
+}
+
+impl ApplicationInfo {
+    /// en50221 Table 61 name of the application type; `None` for a value
+    /// the table does not assign
+    pub fn application_type_name(&self) -> Option<&'static str> {
+        match self.application_type {
+            0x01 => Some("Conditional Access"),
+            0x02 => Some("Electronic Programme Guide"),
+            _ => None,
+        }
+    }
 }
 
 fn parse_application_info(slot_id: u8, body: &[u8]) -> Result<ApplicationInfo> {

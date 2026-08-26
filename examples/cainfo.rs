@@ -41,15 +41,6 @@ const ABSENT_GRACE: Duration = Duration::from_secs(2);
 /// report goes out without it; a CAM regularly takes 10-20 seconds to boot
 const IDENTIFY_LIMIT: Duration = Duration::from_secs(30);
 
-/// en50221 Table 61
-fn application_type_name(application_type: u8) -> &'static str {
-    match application_type {
-        0x01 => " (Conditional Access)",
-        0x02 => " (Electronic Programme Guide)",
-        _ => "",
-    }
-}
-
 /// The capabilities the CA device reports before the stack comes up
 fn print_device(device: &CaDevice) -> Result<(), Box<dyn Error>> {
     println!(
@@ -155,11 +146,10 @@ fn report(ci: &CiController) {
         match ci.app_info(slot_id) {
             Some(info) => {
                 println!("    menu string: {}", info.menu_string);
-                println!(
-                    "    application type: 0x{:02X}{}",
-                    info.application_type,
-                    application_type_name(info.application_type)
-                );
+                match info.application_type_name() {
+                    Some(name) => println!("    application type: {name}"),
+                    None => println!("    application type: 0x{:02X}", info.application_type),
+                }
                 println!("    manufacturer: 0x{:04X}", info.application_manufacturer);
                 println!("    manufacturer code: 0x{:04X}", info.manufacturer_code);
             }
