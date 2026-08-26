@@ -33,9 +33,8 @@ use libdvb::{
 /// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
 const TICK: Duration = Duration::from_millis(50);
 
-/// How long a slot may stay unreported before it counts as empty: the
-/// controller reads the physical slot state within its first
-/// `CiControllerConfig::slot_status_interval`
+/// How long a slot may stay `Absent` before it counts as empty: after the
+/// CA_RESET a module may need a moment to report present again
 const ABSENT_GRACE: Duration = Duration::from_secs(2);
 
 /// How long a module may take to identify itself after the reset before the
@@ -86,7 +85,7 @@ fn print_device(device: &CaDevice) -> Result<(), Box<dyn Error>> {
 fn all_settled(ci: &CiController, elapsed: Duration) -> bool {
     (0 .. ci.slots_num()).all(
         |slot_id| match (ci.status(slot_id), ci.cam_status(slot_id)) {
-            (Ok(CaSlotStatus::Absent), _) => elapsed >= ABSENT_GRACE,
+            (Ok(CaSlotStatus::Absent), _) => ci.slots_scanned() && elapsed >= ABSENT_GRACE,
             (_, Ok(CamStatus::Ready)) => true,
             _ => false,
         },

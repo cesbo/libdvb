@@ -222,6 +222,8 @@ pub struct CiController {
     link_suspended: bool,
     recovery_at: Option<Instant>,
     deferred_link_failure: bool,
+    /// whether refresh_slot_info completed at least once
+    slots_scanned: bool,
 }
 
 impl AsRawFd for CiController {
@@ -296,6 +298,7 @@ impl CiController {
             link_suspended: false,
             recovery_at: None,
             deferred_link_failure: false,
+            slots_scanned: false,
         }
     }
 
@@ -318,6 +321,18 @@ impl CiController {
             .get(usize::from(slot_id))
             .map(|slot| slot.cam_status)
             .ok_or_else(|| Error::InvalidProperty(format!("ca invalid slot id {}", slot_id)))
+    }
+
+    /// Whether the physical slot states have been read at least once
+    ///
+    /// Until the first `tick(now)` completes a slot scan every slot
+    /// reports [`CaSlotStatus::Absent`], inserted module or not. Note
+    /// that after the CA_RESET issued on creation a module may need a
+    /// moment to report present again, so a short grace period on top of
+    /// this flag is still advisable before an `Absent` slot is treated
+    /// as empty.
+    pub fn slots_scanned(&self) -> bool {
+        self.slots_scanned
     }
 
     /// Last application information received from a CAM
@@ -791,6 +806,7 @@ impl CiController {
         for (slot_id, info) in infos.into_iter().enumerate() {
             self.apply_slot_info(slot_id as u8, info);
         }
+        self.slots_scanned = true;
         Ok(())
     }
 
@@ -1535,6 +1551,14 @@ mod tests {
         let (mut controller, _cam, _state) = pair(1);
         assert_eq!(controller.poll_event().unwrap(), None);
         assert_eq!(controller.status(0).unwrap(), CaSlotStatus::Absent);
+    }
+
+    #[test]
+    fn test_slots_scanned_flips_on_the_first_tick() {
+        let (mut controller, _cam, _state) = pair(1);
+        assert!(!controller.slots_scanned());
+        controller.tick(Instant::now()).unwrap();
+        assert!(controller.slots_scanned());
     }
 
     #[test]
