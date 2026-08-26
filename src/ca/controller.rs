@@ -341,6 +341,12 @@ impl CiController {
         Ok(self.session.session_caids(slot_id, session_id))
     }
 
+    /// Active sessions of a slot as (session id, resource id) pairs;
+    /// an unknown slot has none
+    pub fn sessions(&self, slot_id: u8) -> impl Iterator<Item = (u16, ResourceId)> + '_ {
+        self.session.sessions(slot_id)
+    }
+
     /// Adds or replaces a program in the CAM selection.
     ///
     /// `pmt_section` is one complete raw MPEG-TS PMT section including its CRC32, parsed and

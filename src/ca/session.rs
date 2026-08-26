@@ -393,6 +393,18 @@ impl CiSession {
             .session_caids(slot_id, session_id)
     }
 
+    /// Active sessions of a slot as (session id, resource id) pairs
+    pub fn sessions(&self, slot_id: u8) -> impl Iterator<Item = (u16, ResourceId)> + '_ {
+        self.sessions
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, entry)| {
+                let session = entry.as_ref()?;
+                (session.slot_id == slot_id && matches!(session.state, SessionState::Active))
+                    .then_some(((index + 1) as u16, session.resource_id))
+            })
+    }
+
     pub(super) fn set_program(&mut self, program: Program) -> Result<Vec<u8>> {
         self.resources
             .conditional_access
@@ -1576,6 +1588,33 @@ mod tests {
 
         assert!(session.mmi_close(1, second).is_err());
         assert!(pump(&mut session, &mut cam).is_empty());
+    }
+
+    #[test]
+    fn test_sessions_lists_active_sessions_of_the_slot() {
+        let (mut session, mut cam) = pair();
+        let mmi = open_session(&mut session, &mut cam, ResourceId::MMI);
+        let app = open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
+
+        let mut open: Vec<(u16, ResourceId)> = session.sessions(0).collect();
+        open.sort_unstable_by_key(|&(session_id, _)| session_id);
+        assert_eq!(
+            open,
+            vec![
+                (mmi, ResourceId::MMI),
+                (app, ResourceId::APPLICATION_INFORMATION),
+            ]
+        );
+        assert_eq!(session.sessions(1).count(), 0);
+
+        // a session closed by the module disappears
+        cam.send_spdu(&[0x95, 0x02, (mmi >> 8) as u8, mmi as u8]);
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(
+            session.sessions(0).collect::<Vec<_>>(),
+            vec![(app, ResourceId::APPLICATION_INFORMATION)]
+        );
     }
 
     #[test]
