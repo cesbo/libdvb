@@ -594,6 +594,25 @@ impl CiController {
         }
     }
 
+    /// Drains the queued events: [`CiController::poll_event`] as an
+    /// iterator, ending at the first empty poll. An error is yielded
+    /// once and ends the iteration; the next call starts over.
+    pub fn events(&mut self) -> impl Iterator<Item = Result<CaEvent>> + '_ {
+        let mut failed = false;
+        std::iter::from_fn(move || {
+            if failed {
+                return None;
+            }
+            match self.poll_event() {
+                Ok(event) => event.map(Ok),
+                Err(error) => {
+                    failed = true;
+                    Some(Err(error))
+                }
+            }
+        })
+    }
+
     /// Advances physical slot checks, transport polling, timeouts and the
     /// paced application of queued CA_PMT changes without blocking
     pub fn tick(&mut self, now: Instant) -> Result<()> {

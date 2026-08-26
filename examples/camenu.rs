@@ -12,7 +12,7 @@
 //! - q leaves
 //!
 //! The controller is driven from a plain sleep loop - `tick()` and
-//! `poll_event()` never block - and the terminal is read from a thread, so
+//! `events()` never block - and the terminal is read from a thread, so
 //! the loop never waits for the user. Watching the CA descriptor (`as_fd`)
 //! with poll(2) instead would only cut the latency.
 //!
@@ -46,7 +46,7 @@ use libdvb::{
 };
 
 /// How long the loop sleeps between the controller ticks. `tick()` and
-/// `poll_event()` never block, so a plain sleep loop is enough; watching the
+/// `events()` never block, so a plain sleep loop is enough; watching the
 /// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
 const TICK: Duration = Duration::from_millis(50);
 
@@ -355,14 +355,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             eprintln!("camenu: tick: {e}");
         }
 
-        loop {
-            match app.ci.poll_event() {
-                Ok(Some(event)) => app.handle_event(event),
-                Ok(None) => break,
-                Err(e) => {
-                    eprintln!("camenu: {e}");
-                    break;
-                }
+        // collected first: handling an event needs the controller again
+        for event in app.ci.events().collect::<Vec<_>>() {
+            match event {
+                Ok(event) => app.handle_event(event),
+                Err(e) => eprintln!("camenu: {e}"),
             }
         }
 
