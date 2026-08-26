@@ -54,12 +54,12 @@ const TICK: Duration = Duration::from_millis(50);
 /// What the open dialogue expects as its answer
 #[derive(Clone, Copy)]
 enum DialogueKind {
-    /// An item number up to `items`; 0 cancels the menu
-    Menu { items: u8 },
+    /// An item number; 0 cancels the menu
+    Menu,
     /// An empty line, closing the list
     List,
-    /// A line of text; exactly `answer_len` characters unless it is 0
-    Enq { answer_len: u8 },
+    /// A line of text; an empty line cancels the enquiry
+    Enq,
 }
 
 /// MMI dialogue a module is waiting for an answer to. The example answers
@@ -176,12 +176,14 @@ impl App {
                 menu,
             } => {
                 print_menu("menu", slot_id, &menu);
-                let items = item_count(&menu);
-                println!("    -> {}", menu_prompt(items));
+                println!(
+                    "    -> enter an item number from 0 to {}, 0 cancels; q leaves",
+                    menu.items.len()
+                );
                 self.dialogue = Some(Dialogue {
                     slot_id,
                     session_id,
-                    kind: DialogueKind::Menu { items },
+                    kind: DialogueKind::Menu,
                 });
             }
             CaEvent::MmiList {
@@ -221,7 +223,7 @@ impl App {
                 self.dialogue = Some(Dialogue {
                     slot_id,
                     session_id,
-                    kind: DialogueKind::Enq { answer_len },
+                    kind: DialogueKind::Enq,
                 });
             }
             CaEvent::MmiText { slot_id, text, .. } => {
@@ -262,13 +264,13 @@ impl App {
         };
 
         match kind {
-            DialogueKind::Menu { items } => match line.parse::<u8>() {
-                Ok(choice) if choice <= items => {
+            DialogueKind::Menu => match line.parse::<u8>() {
+                Ok(choice) => {
                     log_error(self.ci.mmi_menu_answer(slot_id, session_id, choice));
                     // the module answers with the next object of the dialogue
                     self.dialogue = None;
                 }
-                _ => println!("    -> {}", menu_prompt(items)),
+                Err(_) => println!("    -> enter an item number, 0 cancels; q leaves"),
             },
             DialogueKind::List => {
                 if line.is_empty() {
@@ -278,28 +280,10 @@ impl App {
                     println!("    -> press Enter to close the list");
                 }
             }
-            DialogueKind::Enq { answer_len } => {
-                if line.is_empty() {
-                    log_error(self.ci.mmi_answer(slot_id, session_id, None));
-                    self.dialogue = None;
-                } else if !line.bytes().all(|byte| (0x20 ..= 0x7E).contains(&byte)) {
-                    // a module counts characters, not multi-byte sequences,
-                    // and understands the ASCII range only
-                    println!("    -> only printable ASCII characters are accepted");
-                } else if answer_len != 0 && line.len() != usize::from(answer_len) {
-                    // an answer of the wrong length would cost the user one
-                    // of the attempts the CAM allows
-                    println!(
-                        "    -> the module expects exactly {answer_len} characters, {} were typed",
-                        line.len()
-                    );
-                } else {
-                    log_error(
-                        self.ci
-                            .mmi_answer(slot_id, session_id, Some(line.as_bytes())),
-                    );
-                    self.dialogue = None;
-                }
+            DialogueKind::Enq => {
+                let answer = (!line.is_empty()).then(|| line.as_bytes());
+                log_error(self.ci.mmi_answer(slot_id, session_id, answer));
+                self.dialogue = None;
             }
         }
 
@@ -313,25 +297,6 @@ impl App {
         for (slot_id, session_id) in std::mem::take(&mut self.mmi_sessions) {
             println!("CI slot {slot_id}: closing MMI session {session_id}");
             log_error(self.ci.mmi_close(slot_id, session_id));
-        }
-    }
-}
-
-fn menu_prompt(items: u8) -> String {
-    format!("enter an item number from 0 to {items}, 0 cancels; q leaves")
-}
-
-/// The highest item number a menu offers, as `mmi_menu_answer` takes it
-fn item_count(menu: &MmiMenu) -> u8 {
-    match u8::try_from(menu.items.len()) {
-        Ok(items) => items,
-        // menu_answ carries one byte: a module cannot be answered past 255
-        Err(_) => {
-            println!(
-                "    note: the menu has {} items, only 255 can be answered",
-                menu.items.len()
-            );
-            u8::MAX
         }
     }
 }
