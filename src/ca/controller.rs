@@ -40,10 +40,10 @@ use super::{
         CiSession,
     },
     sys::{
-        CA_CI_LINK,
         CA_CI_MODULE_PRESENT,
         CA_CI_MODULE_READY,
         CaSlotInfo,
+        CaSlotType,
     },
     tpdu::TpduTag,
     transport::CiTransport,
@@ -93,7 +93,7 @@ pub enum CamStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaSlotFailure {
     /// The slot does not expose the CI link-layer interface
-    UnsupportedInterface { slot_type: u32 },
+    UnsupportedInterface { slot_type: CaSlotType },
     /// TT_CTC_REPLY did not arrive in time
     CreateTcTimeout,
     /// An active command did not receive a response in time
@@ -261,10 +261,10 @@ impl CiController {
                 caps.slot_num
             ))
         })?;
-        if (caps.slot_type & CA_CI_LINK) == 0 {
+        if !caps.slot_types().contains(CaSlotType::CI_LINK) {
             return Err(Error::InvalidProperty(format!(
-                "ca device does not support the CI link interface: 0x{:X}",
-                caps.slot_type
+                "ca device does not support the CI link interface: {:?}",
+                caps.slot_types()
             )));
         }
 
@@ -779,7 +779,7 @@ impl CiController {
             return;
         }
 
-        if (info.slot_type & CA_CI_LINK) == 0 {
+        if !info.slot_types().contains(CaSlotType::CI_LINK) {
             if self.slots[index].status != CaSlotStatus::Failed
                 || self.slots[index].retry_at.is_some()
             {
@@ -789,7 +789,7 @@ impl CiController {
                 self.events.push_back(CaEvent::SlotFailed {
                     slot_id,
                     reason: CaSlotFailure::UnsupportedInterface {
-                        slot_type: info.slot_type,
+                        slot_type: info.slot_types(),
                     },
                 });
                 self.set_cam_status(slot_id, CamStatus::None);
@@ -1326,7 +1326,7 @@ pub(crate) mod test_support {
             infos: (0 .. slots_num)
                 .map(|slot_id| CaSlotInfo {
                     slot_num: u32::from(slot_id),
-                    slot_type: CA_CI_LINK,
+                    slot_type: CaSlotType::CI_LINK.bits(),
                     flags: 0,
                 })
                 .collect(),

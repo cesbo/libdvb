@@ -26,16 +26,6 @@ use libdvb::{
     CaSlotStatus,
     CamStatus,
     CiController,
-    ca::sys::{
-        CA_CI,
-        CA_CI_LINK,
-        CA_CI_PHYS,
-        CA_DESCR,
-        CA_DSS,
-        CA_ECD,
-        CA_NDS,
-        CA_SC,
-    },
 };
 use libmpegts::utils::textcode::TextcodeRef;
 
@@ -52,52 +42,6 @@ const ABSENT_GRACE: Duration = Duration::from_secs(2);
 /// How long a module may take to identify itself after the reset before the
 /// report goes out without it; a CAM regularly takes 10-20 seconds to boot
 const IDENTIFY_LIMIT: Duration = Duration::from_secs(30);
-
-/// Names the ca_slot_type bits of CA_GET_CAP
-fn slot_type_names(slot_type: u32) -> String {
-    bit_names(
-        slot_type,
-        &[
-            (CA_CI, "CI high level"),
-            (CA_CI_LINK, "CI link layer"),
-            (CA_CI_PHYS, "CI physical layer"),
-            (CA_DESCR, "built-in descrambler"),
-            (CA_SC, "smart card"),
-        ],
-    )
-}
-
-/// Names the ca_descr_type bits of CA_GET_CAP
-fn descr_type_names(descr_type: u32) -> String {
-    bit_names(
-        descr_type,
-        &[(CA_ECD, "ECD"), (CA_NDS, "NDS"), (CA_DSS, "DSS")],
-    )
-}
-
-fn bit_names(value: u32, names: &[(u32, &str)]) -> String {
-    let mut text = String::new();
-    let mut rest = value;
-
-    for &(bit, name) in names {
-        if value & bit != 0 {
-            if !text.is_empty() {
-                text.push_str(", ");
-            }
-            text.push_str(name);
-            rest &= !bit;
-        }
-    }
-
-    if rest != 0 || text.is_empty() {
-        if !text.is_empty() {
-            text.push_str(", ");
-        }
-        text.push_str(&format!("0x{rest:X}"));
-    }
-
-    text
-}
 
 /// en50221 Table 61
 fn application_type_name(application_type: u8) -> &'static str {
@@ -130,16 +74,16 @@ fn print_device(device: &CaDevice) -> Result<(), Box<dyn Error>> {
 
     let caps = device.caps()?;
     println!(
-        "    module slots: {} ({})",
+        "    module slots: {}, {:?}",
         caps.slot_num,
-        slot_type_names(caps.slot_type)
+        caps.slot_types()
     );
 
     if caps.descr_num != 0 {
         println!(
-            "    descramblers: {} ({})",
+            "    descramblers: {}, {:?}",
             caps.descr_num,
-            descr_type_names(caps.descr_type)
+            caps.descr_types()
         );
     }
 
