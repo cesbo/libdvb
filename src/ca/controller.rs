@@ -436,6 +436,33 @@ impl CiController {
         self.finish_slot_command(slot_id, result)
     }
 
+    /// Asks the CAMs to close every open MMI dialogue
+    ///
+    /// A CAM left with an MMI session open can refuse the next dialogue,
+    /// so a host closes the sessions on the way out. The requests are
+    /// written out right away and need no answer; the modules close the
+    /// sessions in response. The async driver calls this on shutdown.
+    /// The last error is returned after every session was asked.
+    pub fn close_all_mmi(&mut self) -> Result<()> {
+        let mut result = Ok(());
+
+        for slot_id in 0 .. self.slots_num() {
+            let sessions: Vec<u16> = self
+                .sessions(slot_id)
+                .filter(|(_, resource_id)| resource_id.base() == ResourceId::MMI.base())
+                .map(|(session_id, _)| session_id)
+                .collect();
+
+            for session_id in sessions {
+                if let Err(error) = self.mmi_close(slot_id, session_id) {
+                    result = Err(error);
+                }
+            }
+        }
+
+        result
+    }
+
     /// Asks the CAM to release the host-control resource
     pub fn ask_release(&mut self, slot_id: u8) -> Result<()> {
         self.require_active(slot_id)?;
@@ -1491,6 +1518,7 @@ mod tests {
     use super::{
         super::{
             ApduTag,
+            apdu,
             capmt::{
                 CaPmtCommand,
                 CaPmtListManagement,
@@ -1896,6 +1924,56 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn test_close_all_mmi_closes_every_open_dialogue() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+
+        // the module opens an MMI session
+        let raw = ResourceId::MMI.raw();
+        cam.send_spdu(
+            0,
+            &[
+                0x91,
+                0x04,
+                (raw >> 24) as u8,
+                (raw >> 16) as u8,
+                (raw >> 8) as u8,
+                raw as u8,
+            ],
+        );
+        let events = drain(&mut controller);
+        let session_id = events
+            .iter()
+            .find_map(|event| match event {
+                CaEvent::SessionOpened {
+                    slot_id: 0,
+                    session_id,
+                    resource_id,
+                } if resource_id.base() == ResourceId::MMI.base() => Some(*session_id),
+                _ => None,
+            })
+            .expect("mmi session opened");
+        let response = spdu::build_open_session_response(spdu::SS_OK, ResourceId::MMI, session_id);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(0, TpduTag::DATA_LAST, &response).unwrap()
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        controller.close_all_mmi().unwrap();
+        let mut expected = spdu::build_session_number(session_id);
+        apdu::build(&mut expected, ApduTag::CLOSE_MMI, &[0x00]);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(0, TpduTag::DATA_LAST, &expected).unwrap()
+        );
+        assert!(cam.recv().is_none());
     }
 
     #[test]

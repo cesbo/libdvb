@@ -42,7 +42,6 @@ use libdvb::{
     ca::{
         DvbText,
         MmiMenu,
-        ResourceId,
     },
 };
 
@@ -82,8 +81,6 @@ struct App {
     /// A CAM may repeat its application info, and a second `enter_menu`
     /// would throw away the dialogue the user is in the middle of.
     menu_requested: Vec<bool>,
-    /// MMI sessions the modules opened, closed politely on the way out
-    mmi_sessions: Vec<(u8, u16)>,
 }
 
 impl App {
@@ -92,7 +89,6 @@ impl App {
             menu_requested: vec![false; usize::from(ci.slots_num())],
             ci,
             dialogue: None,
-            mmi_sessions: Vec::new(),
         }
     }
 
@@ -126,8 +122,6 @@ impl App {
             self.dialogue = None;
         }
 
-        self.mmi_sessions.retain(|&(slot, _)| slot != slot_id);
-
         if let Some(requested) = self.menu_requested.get_mut(usize::from(slot_id)) {
             *requested = false;
         }
@@ -147,15 +141,6 @@ impl App {
                 println!("CI slot {slot_id}: CAM {:?}", info.menu_string);
                 self.enter_menu_once(slot_id);
             }
-            CaEvent::SessionOpened {
-                slot_id,
-                session_id,
-                resource_id,
-            } => {
-                if resource_id == ResourceId::MMI {
-                    self.mmi_sessions.push((slot_id, session_id));
-                }
-            }
             CaEvent::SessionClosed {
                 slot_id,
                 session_id,
@@ -163,8 +148,6 @@ impl App {
             } => {
                 // the dialogue also ends when the module drops the session
                 // without a close_mmi: the pending answer must not outlive it
-                self.mmi_sessions
-                    .retain(|&session| session != (slot_id, session_id));
                 self.drop_dialogue(slot_id, session_id);
             }
             CaEvent::MmiMenu {
@@ -286,16 +269,6 @@ impl App {
 
         true
     }
-
-    /// Asks the modules to take the open dialogues down on the way out: a
-    /// CAM left with a session open can refuse the next one. The transport
-    /// writes the request out right away and the close needs no answer.
-    fn close_mmi_sessions(&mut self) {
-        for (slot_id, session_id) in std::mem::take(&mut self.mmi_sessions) {
-            println!("CI slot {slot_id}: closing MMI session {session_id}");
-            log_error(self.ci.mmi_close(slot_id, session_id));
-        }
-    }
 }
 
 /// Prints DVB text under a fixed indent, keeping the line breaks the module
@@ -413,7 +386,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         thread::sleep(TICK);
     }
 
-    app.close_mmi_sessions();
+    // a CAM left with a dialogue open can refuse the next one
+    log_error(app.ci.close_all_mmi());
 
     Ok(())
 }
