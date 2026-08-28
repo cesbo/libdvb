@@ -29,7 +29,7 @@ use libdvb::{
 };
 
 /// How long the loop sleeps between the controller ticks. `tick()` and
-/// `events()` never block, so a plain sleep loop is enough; watching the
+/// `poll_event()` never block, so a plain sleep loop is enough; watching the
 /// CA descriptor (`as_fd`) with poll(2) instead would only cut the latency.
 const TICK: Duration = Duration::from_millis(50);
 
@@ -94,7 +94,7 @@ fn collect(ci: &mut CiController) {
             eprintln!("cainfo: tick: {e}");
         }
 
-        for event in ci.events() {
+        while let Some(event) = ci.poll_event().transpose() {
             if let Err(e) = event {
                 eprintln!("cainfo: {e}");
             }

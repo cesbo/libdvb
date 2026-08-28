@@ -246,8 +246,8 @@ let mut ci = CiController::open(0, 0)?;
 ci.tick(Instant::now())?;
 
 // Drain after each tick and from the CA descriptor readable callback.
-for event in ci.events() {
-    match event? {
+while let Some(event) = ci.poll_event()? {
+    match event {
         CaEvent::SlotStatusChanged { slot_id, new, .. } => {
             println!("CI slot {slot_id}: {new:?}");
         }
