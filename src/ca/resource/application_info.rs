@@ -10,15 +10,17 @@ use super::{
     super::{
         apdu::ApduTag,
         session::CaEvent,
-        text::DvbText,
     },
     Resource,
     ResourceContext,
     ResourceId,
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// en50221 8.4.2.2: application_info object

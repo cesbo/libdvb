@@ -13,14 +13,16 @@ use super::{
     super::apdu,
     super::apdu::ApduTag,
     super::session::CaEvent,
-    super::text::DvbText,
     Resource,
     ResourceContext,
     ResourceId,
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// Cap for an MMI object reassembled from a *_more chain

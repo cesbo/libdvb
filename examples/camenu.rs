@@ -39,10 +39,8 @@ use libdvb::{
     CaEvent,
     CaSlotStatus,
     CiController,
-    ca::{
-        DvbText,
-        MmiMenu,
-    },
+    DvbText,
+    ca::MmiMenu,
 };
 
 /// How long the loop sleeps between the controller ticks. `tick()` and

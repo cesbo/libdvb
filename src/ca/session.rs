@@ -40,15 +40,17 @@ use super::{
     },
     spdu,
     spdu::Spdu,
-    text::DvbText,
     transport::{
         CiTransport,
         TransportRecv,
     },
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// Highest number of concurrent sessions per slot

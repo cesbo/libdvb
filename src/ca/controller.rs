@@ -445,9 +445,8 @@ impl CiController {
         self.finish_slot_command(slot_id, result)
     }
 
-    /// Asks the CAMs to close every open MMI dialogue
-    ///
-    /// The last error is returned after every session was asked.
+    /// Asks the CAMs to close every open MMI dialogue; the last error is
+    /// returned after every session was asked
     pub fn close_all_mmi(&mut self) -> Result<()> {
         let mut result = Ok(());
 
