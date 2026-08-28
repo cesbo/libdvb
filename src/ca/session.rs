@@ -45,9 +45,12 @@ use super::{
         TransportRecv,
     },
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// Highest number of concurrent sessions per slot
@@ -123,7 +126,7 @@ pub enum CaEvent {
     MmiText {
         slot_id: u8,
         session_id: u16,
-        text: Vec<u8>,
+        text: DvbText,
     },
     /// menu_last: a menu to display; the selection is answered with
     /// [`CiSession::mmi_menu_answer`]
@@ -148,8 +151,8 @@ pub enum CaEvent {
         blind: bool,
         /// expected answer length
         answer_len: u8,
-        /// prompt in DVB charset coding (EN 300 468 annex A)
-        text: Vec<u8>,
+        /// prompt
+        text: DvbText,
     },
     /// tune: the module asks the host to tune to the service
     Tune {
@@ -390,6 +393,18 @@ impl CiSession {
         self.resources
             .conditional_access
             .session_caids(slot_id, session_id)
+    }
+
+    /// Active sessions of a slot as (session id, resource id) pairs
+    pub fn sessions(&self, slot_id: u8) -> impl Iterator<Item = (u16, ResourceId)> + '_ {
+        self.sessions
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, entry)| {
+                let session = entry.as_ref()?;
+                (session.slot_id == slot_id && matches!(session.state, SessionState::Active))
+                    .then_some(((index + 1) as u16, session.resource_id))
+            })
     }
 
     pub(super) fn set_program(&mut self, program: Program) -> Result<Vec<u8>> {
@@ -1215,7 +1230,7 @@ mod tests {
             application_type: 0x01,
             application_manufacturer: 0x1234,
             manufacturer_code: 0x5678,
-            menu_string: b"Test CAM".to_vec(),
+            menu_string: b"Test CAM".to_vec().into(),
         };
         assert_eq!(
             events(&mut session),
@@ -1251,7 +1266,7 @@ mod tests {
         );
         pump(&mut session, &mut cam);
         events(&mut session);
-        assert_eq!(session.app_info(0).unwrap().menu_string, b"Two");
+        assert_eq!(session.app_info(0).unwrap().menu_string.as_bytes(), b"Two");
         session.enter_menu(0).unwrap();
         assert_eq!(
             pump(&mut session, &mut cam),
@@ -1266,7 +1281,7 @@ mod tests {
         );
         pump(&mut session, &mut cam);
         events(&mut session);
-        assert_eq!(session.app_info(0).unwrap().menu_string, b"One");
+        assert_eq!(session.app_info(0).unwrap().menu_string.as_bytes(), b"One");
         session.enter_menu(0).unwrap();
         assert_eq!(
             pump(&mut session, &mut cam),
@@ -1276,7 +1291,7 @@ mod tests {
         cam.send_spdu(&[0x95, 0x02, 0x00, first as u8]);
         pump(&mut session, &mut cam);
         events(&mut session);
-        assert_eq!(session.app_info(0).unwrap().menu_string, b"Two");
+        assert_eq!(session.app_info(0).unwrap().menu_string.as_bytes(), b"Two");
     }
 
     #[test]
@@ -1481,10 +1496,10 @@ mod tests {
                 slot_id: 0,
                 session_id,
                 menu: MmiMenu {
-                    title: b"Menu".to_vec(),
-                    sub_title: Vec::new(),
-                    bottom: Vec::new(),
-                    items: vec![b"Info".to_vec(), b"Exit".to_vec()],
+                    title: b"Menu".to_vec().into(),
+                    sub_title: DvbText::default(),
+                    bottom: DvbText::default(),
+                    items: vec![b"Info".to_vec().into(), b"Exit".to_vec().into()],
                 },
             }]
         );
@@ -1509,7 +1524,7 @@ mod tests {
                 session_id,
                 blind: true,
                 answer_len: 4,
-                text: b"PIN:".to_vec(),
+                text: b"PIN:".to_vec().into(),
             }]
         );
 
@@ -1578,6 +1593,33 @@ mod tests {
     }
 
     #[test]
+    fn test_sessions_lists_active_sessions_of_the_slot() {
+        let (mut session, mut cam) = pair();
+        let mmi = open_session(&mut session, &mut cam, ResourceId::MMI);
+        let app = open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
+
+        let mut open: Vec<(u16, ResourceId)> = session.sessions(0).collect();
+        open.sort_unstable_by_key(|&(session_id, _)| session_id);
+        assert_eq!(
+            open,
+            vec![
+                (mmi, ResourceId::MMI),
+                (app, ResourceId::APPLICATION_INFORMATION),
+            ]
+        );
+        assert_eq!(session.sessions(1).count(), 0);
+
+        // a session closed by the module disappears
+        cam.send_spdu(&[0x95, 0x02, (mmi >> 8) as u8, mmi as u8]);
+        pump(&mut session, &mut cam);
+        events(&mut session);
+        assert_eq!(
+            session.sessions(0).collect::<Vec<_>>(),
+            vec![(app, ResourceId::APPLICATION_INFORMATION)]
+        );
+    }
+
+    #[test]
     fn test_fragmented_spdu() {
         let (mut session, mut cam) = pair();
         let session_id = open_session(&mut session, &mut cam, ResourceId::APPLICATION_INFORMATION);
@@ -1598,7 +1640,10 @@ mod tests {
             events(&mut session).as_slice(),
             [CaEvent::ApplicationInfo { slot_id: 0, .. }]
         ));
-        assert_eq!(session.app_info(0).unwrap().menu_string, vec![b'x'; 200]);
+        assert_eq!(
+            session.app_info(0).unwrap().menu_string.as_bytes(),
+            vec![b'x'; 200]
+        );
     }
 
     #[test]
@@ -1624,10 +1669,10 @@ mod tests {
                 slot_id: 0,
                 session_id,
                 menu: MmiMenu {
-                    title: b"Menu".to_vec(),
-                    sub_title: Vec::new(),
-                    bottom: Vec::new(),
-                    items: vec![b"Info".to_vec(), b"Exit".to_vec()],
+                    title: b"Menu".to_vec().into(),
+                    sub_title: DvbText::default(),
+                    bottom: DvbText::default(),
+                    items: vec![b"Info".to_vec().into(), b"Exit".to_vec().into()],
                 },
             }]
         );
@@ -1641,7 +1686,7 @@ mod tests {
             vec![CaEvent::MmiText {
                 slot_id: 0,
                 session_id,
-                text: b"Hello, world".to_vec(),
+                text: b"Hello, world".to_vec().into(),
             }]
         );
 
@@ -1656,10 +1701,10 @@ mod tests {
                 slot_id: 0,
                 session_id,
                 menu: MmiMenu {
-                    title: b"Menu".to_vec(),
-                    sub_title: Vec::new(),
-                    bottom: Vec::new(),
-                    items: vec![b"Info".to_vec(), b"Exit".to_vec()],
+                    title: b"Menu".to_vec().into(),
+                    sub_title: DvbText::default(),
+                    bottom: DvbText::default(),
+                    items: vec![b"Info".to_vec().into(), b"Exit".to_vec().into()],
                 },
             }]
         );
@@ -1731,7 +1776,7 @@ mod tests {
             vec![CaEvent::MmiText {
                 slot_id: 0,
                 session_id,
-                text: b"bye".to_vec(),
+                text: b"bye".to_vec().into(),
             }]
         );
 

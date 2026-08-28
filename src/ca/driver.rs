@@ -259,6 +259,8 @@ impl CiDriver {
     /// closes the device.
     pub async fn run(mut self) -> Result<()> {
         let result = self.run_loop().await;
+        // A CAM left with an MMI dialogue open can refuse the next one
+        let _ = self.controller.close_all_mmi();
         // The device is about to close: publish not-ready on every exit
         let _ = self.ready.send(false);
         result

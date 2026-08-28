@@ -17,9 +17,12 @@ use super::{
     ResourceContext,
     ResourceId,
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// Cap for an MMI object reassembled from a *_more chain
@@ -47,15 +50,13 @@ const ANSW_CANCEL: u8 = 0x00;
 const ANSW_ANSWER: u8 = 0x01;
 
 /// High-level MMI menu or list (en50221 8.6.2)
-///
-/// All strings are in DVB charset coding (EN 300 468 annex A).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MmiMenu {
-    pub title: Vec<u8>,
-    pub sub_title: Vec<u8>,
-    pub bottom: Vec<u8>,
+    pub title: DvbText,
+    pub sub_title: DvbText,
+    pub bottom: DvbText,
     /// menu choices; a menu answer is the 1-based item number
-    pub items: Vec<Vec<u8>>,
+    pub items: Vec<DvbText>,
 }
 
 /// Parses one nested text object: a text_more chain closed by text_last.
@@ -107,9 +108,9 @@ fn parse_menu(body: &[u8]) -> MmiMenu {
 
     let [title, sub_title, bottom] = header;
     let mut menu = MmiMenu {
-        title,
-        sub_title,
-        bottom,
+        title: title.into(),
+        sub_title: sub_title.into(),
+        bottom: bottom.into(),
         items: Vec::new(),
     };
 
@@ -118,7 +119,7 @@ fn parse_menu(body: &[u8]) -> MmiMenu {
     }
 
     while let Some((item, size)) = parse_text(&body[offset ..]) {
-        menu.items.push(item);
+        menu.items.push(item.into());
         offset += size;
     }
 
@@ -224,7 +225,7 @@ impl Resource for MmiResource {
                 ctx.event(CaEvent::MmiText {
                     slot_id: ctx.slot_id,
                     session_id: ctx.session_id,
-                    text,
+                    text: text.into(),
                 });
 
                 Ok(())
@@ -241,7 +242,7 @@ impl Resource for MmiResource {
                     session_id: ctx.session_id,
                     blind: (body[0] & 0x01) != 0,
                     answer_len: body[1],
-                    text: body[2 ..].to_vec(),
+                    text: body[2 ..].into(),
                 });
 
                 Ok(())
@@ -300,10 +301,10 @@ mod tests {
         assert_eq!(
             parse_menu(&body),
             MmiMenu {
-                title: b"Menu".to_vec(),
-                sub_title: b"Sub".to_vec(),
-                bottom: Vec::new(),
-                items: vec![b"Info".to_vec(), b"Exit".to_vec()],
+                title: b"Menu".to_vec().into(),
+                sub_title: b"Sub".to_vec().into(),
+                bottom: DvbText::default(),
+                items: vec![b"Info".to_vec().into(), b"Exit".to_vec().into()],
             }
         );
     }
@@ -318,8 +319,8 @@ mod tests {
         body.extend_from_slice(&text_object(b"Item"));
 
         let menu = parse_menu(&body);
-        assert_eq!(menu.title, b"Title".to_vec());
-        assert_eq!(menu.items, vec![b"Item".to_vec()]);
+        assert_eq!(menu.title.as_bytes(), b"Title");
+        assert_eq!(menu.items, vec![b"Item".to_vec().into()]);
     }
 
     #[test]
@@ -334,7 +335,7 @@ mod tests {
         body.extend_from_slice(&text_object(b"Title"));
         body.extend_from_slice(&[0x9F, 0x88]);
         let menu = parse_menu(&body);
-        assert_eq!(menu.title, b"Title".to_vec());
+        assert_eq!(menu.title.as_bytes(), b"Title");
         assert!(menu.items.is_empty());
 
         // damaged trailing item: complete items survive
@@ -346,7 +347,7 @@ mod tests {
         // text_more chain without the closing text_last
         apdu::build(&mut body, ApduTag::TEXT_MORE, b"broken");
         let menu = parse_menu(&body);
-        assert_eq!(menu.items, vec![b"Item".to_vec()]);
+        assert_eq!(menu.items, vec![b"Item".to_vec().into()]);
     }
 
     #[test]

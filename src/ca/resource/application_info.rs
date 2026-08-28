@@ -15,20 +15,36 @@ use super::{
     ResourceContext,
     ResourceId,
 };
-use crate::error::{
-    Error,
-    Result,
+use crate::{
+    error::{
+        Error,
+        Result,
+    },
+    text::DvbText,
 };
 
 /// en50221 8.4.2.2: application_info object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplicationInfo {
-    /// en50221 Table 61: 0x01 - Conditional Access, 0x02 - EPG
+    /// en50221 Table 61 value, named by
+    /// [`ApplicationInfo::application_type_name`]
     pub application_type: u8,
     pub application_manufacturer: u16,
     pub manufacturer_code: u16,
-    /// application name in DVB charset coding (EN 300 468 annex A)
-    pub menu_string: Vec<u8>,
+    /// application name
+    pub menu_string: DvbText,
+}
+
+impl ApplicationInfo {
+    /// en50221 Table 61 name of the application type; `None` for a value
+    /// the table does not assign
+    pub fn application_type_name(&self) -> Option<&'static str> {
+        match self.application_type {
+            0x01 => Some("Conditional Access"),
+            0x02 => Some("Electronic Programme Guide"),
+            _ => None,
+        }
+    }
 }
 
 fn parse_application_info(slot_id: u8, body: &[u8]) -> Result<ApplicationInfo> {
@@ -47,7 +63,7 @@ fn parse_application_info(slot_id: u8, body: &[u8]) -> Result<ApplicationInfo> {
                 slot_id
             ))
         })?
-        .to_vec();
+        .into();
 
     Ok(ApplicationInfo {
         application_type: body[0],
@@ -164,7 +180,7 @@ mod tests {
                 application_type: 0x01,
                 application_manufacturer: 0x1234,
                 manufacturer_code: 0x5678,
-                menu_string: b"Test CAM".to_vec(),
+                menu_string: b"Test CAM".to_vec().into(),
             }
         );
     }
@@ -180,7 +196,7 @@ mod tests {
     fn test_parse_ignores_trailing_bytes() {
         let body = [0x01, 0x12, 0x34, 0x56, 0x78, 0x01, b'A', 0xFF, 0xFF];
         let info = parse_application_info(0, &body).unwrap();
-        assert_eq!(info.menu_string, b"A".to_vec());
+        assert_eq!(info.menu_string.as_bytes(), b"A");
     }
 
     #[test]

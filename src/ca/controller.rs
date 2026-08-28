@@ -40,10 +40,10 @@ use super::{
         CiSession,
     },
     sys::{
-        CA_CI_LINK,
         CA_CI_MODULE_PRESENT,
         CA_CI_MODULE_READY,
         CaSlotInfo,
+        CaSlotType,
     },
     tpdu::TpduTag,
     transport::CiTransport,
@@ -93,7 +93,7 @@ pub enum CamStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaSlotFailure {
     /// The slot does not expose the CI link-layer interface
-    UnsupportedInterface { slot_type: u32 },
+    UnsupportedInterface { slot_type: CaSlotType },
     /// TT_CTC_REPLY did not arrive in time
     CreateTcTimeout,
     /// An active command did not receive a response in time
@@ -222,6 +222,8 @@ pub struct CiController {
     link_suspended: bool,
     recovery_at: Option<Instant>,
     deferred_link_failure: bool,
+    /// whether refresh_slot_info completed at least once
+    slots_scanned: bool,
 }
 
 impl AsRawFd for CiController {
@@ -261,10 +263,10 @@ impl CiController {
                 caps.slot_num
             ))
         })?;
-        if (caps.slot_type & CA_CI_LINK) == 0 {
+        if !caps.slot_types().contains(CaSlotType::CI_LINK) {
             return Err(Error::InvalidProperty(format!(
-                "ca device does not support the CI link interface: 0x{:X}",
-                caps.slot_type
+                "ca device does not support the CI link interface: {:?}",
+                caps.slot_types()
             )));
         }
 
@@ -296,6 +298,7 @@ impl CiController {
             link_suspended: false,
             recovery_at: None,
             deferred_link_failure: false,
+            slots_scanned: false,
         }
     }
 
@@ -320,6 +323,12 @@ impl CiController {
             .ok_or_else(|| Error::InvalidProperty(format!("ca invalid slot id {}", slot_id)))
     }
 
+    /// Whether the physical slot states have been read at least once;
+    /// until then every slot reports [`CaSlotStatus::Absent`]
+    pub fn slots_scanned(&self) -> bool {
+        self.slots_scanned
+    }
+
     /// Last application information received from a CAM
     pub fn app_info(&self, slot_id: u8) -> Option<&ApplicationInfo> {
         self.session.app_info(slot_id)
@@ -339,6 +348,12 @@ impl CiController {
     pub fn session_caids(&self, slot_id: u8, session_id: u16) -> Result<Option<&[u16]>> {
         self.status(slot_id)?;
         Ok(self.session.session_caids(slot_id, session_id))
+    }
+
+    /// Active sessions of a slot as (session id, resource id) pairs;
+    /// an unknown slot has none
+    pub fn sessions(&self, slot_id: u8) -> impl Iterator<Item = (u16, ResourceId)> + '_ {
+        self.session.sessions(slot_id)
     }
 
     /// Adds or replaces a program in the CAM selection.
@@ -428,6 +443,28 @@ impl CiController {
         self.require_active(slot_id)?;
         let result = self.session.mmi_close(slot_id, session_id);
         self.finish_slot_command(slot_id, result)
+    }
+
+    /// Asks the CAMs to close every open MMI dialogue; the last error is
+    /// returned after every session was asked
+    pub fn close_all_mmi(&mut self) -> Result<()> {
+        let mut result = Ok(());
+
+        for slot_id in 0 .. self.slots_num() {
+            let sessions: Vec<u16> = self
+                .sessions(slot_id)
+                .filter(|(_, resource_id)| resource_id.base() == ResourceId::MMI.base())
+                .map(|(session_id, _)| session_id)
+                .collect();
+
+            for session_id in sessions {
+                if let Err(error) = self.mmi_close(slot_id, session_id) {
+                    result = Err(error);
+                }
+            }
+        }
+
+        result
     }
 
     /// Asks the CAM to release the host-control resource
@@ -758,6 +795,7 @@ impl CiController {
         for (slot_id, info) in infos.into_iter().enumerate() {
             self.apply_slot_info(slot_id as u8, info);
         }
+        self.slots_scanned = true;
         Ok(())
     }
 
@@ -779,7 +817,7 @@ impl CiController {
             return;
         }
 
-        if (info.slot_type & CA_CI_LINK) == 0 {
+        if !info.slot_types().contains(CaSlotType::CI_LINK) {
             if self.slots[index].status != CaSlotStatus::Failed
                 || self.slots[index].retry_at.is_some()
             {
@@ -789,7 +827,7 @@ impl CiController {
                 self.events.push_back(CaEvent::SlotFailed {
                     slot_id,
                     reason: CaSlotFailure::UnsupportedInterface {
-                        slot_type: info.slot_type,
+                        slot_type: info.slot_types(),
                     },
                 });
                 self.set_cam_status(slot_id, CamStatus::None);
@@ -1326,7 +1364,7 @@ pub(crate) mod test_support {
             infos: (0 .. slots_num)
                 .map(|slot_id| CaSlotInfo {
                     slot_num: u32::from(slot_id),
-                    slot_type: CA_CI_LINK,
+                    slot_type: CaSlotType::CI_LINK.bits(),
                     flags: 0,
                 })
                 .collect(),
@@ -1485,6 +1523,7 @@ mod tests {
     use super::{
         super::{
             ApduTag,
+            apdu,
             capmt::{
                 CaPmtCommand,
                 CaPmtListManagement,
@@ -1501,6 +1540,14 @@ mod tests {
         let (mut controller, _cam, _state) = pair(1);
         assert_eq!(controller.poll_event().unwrap(), None);
         assert_eq!(controller.status(0).unwrap(), CaSlotStatus::Absent);
+    }
+
+    #[test]
+    fn test_slots_scanned_flips_on_the_first_tick() {
+        let (mut controller, _cam, _state) = pair(1);
+        assert!(!controller.slots_scanned());
+        controller.tick(Instant::now()).unwrap();
+        assert!(controller.slots_scanned());
     }
 
     #[test]
@@ -1871,7 +1918,10 @@ mod tests {
             controller.cam_status(0).unwrap(),
             CamStatus::ApplicationInfo
         );
-        assert_eq!(controller.app_info(0).unwrap().menu_string, b"CAM");
+        assert_eq!(
+            controller.app_info(0).unwrap().menu_string.as_bytes(),
+            b"CAM"
+        );
 
         set_flags(&state, 0, 0);
         controller.tick(now).unwrap();
@@ -1887,6 +1937,56 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn test_close_all_mmi_closes_every_open_dialogue() {
+        let (mut controller, mut cam, state) = pair(1);
+        let now = Instant::now();
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+
+        // the module opens an MMI session
+        let raw = ResourceId::MMI.raw();
+        cam.send_spdu(
+            0,
+            &[
+                0x91,
+                0x04,
+                (raw >> 24) as u8,
+                (raw >> 16) as u8,
+                (raw >> 8) as u8,
+                raw as u8,
+            ],
+        );
+        let events = drain(&mut controller);
+        let session_id = events
+            .iter()
+            .find_map(|event| match event {
+                CaEvent::SessionOpened {
+                    slot_id: 0,
+                    session_id,
+                    resource_id,
+                } if resource_id.base() == ResourceId::MMI.base() => Some(*session_id),
+                _ => None,
+            })
+            .expect("mmi session opened");
+        let response = spdu::build_open_session_response(spdu::SS_OK, ResourceId::MMI, session_id);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(0, TpduTag::DATA_LAST, &response).unwrap()
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        controller.close_all_mmi().unwrap();
+        let mut expected = spdu::build_session_number(session_id);
+        apdu::build(&mut expected, ApduTag::CLOSE_MMI, &[0x00]);
+        assert_eq!(
+            cam.recv().unwrap(),
+            tpdu::build(0, TpduTag::DATA_LAST, &expected).unwrap()
+        );
+        assert!(cam.recv().is_none());
     }
 
     #[test]
