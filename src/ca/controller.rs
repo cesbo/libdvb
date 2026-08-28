@@ -323,14 +323,8 @@ impl CiController {
             .ok_or_else(|| Error::InvalidProperty(format!("ca invalid slot id {}", slot_id)))
     }
 
-    /// Whether the physical slot states have been read at least once
-    ///
-    /// Until the first `tick(now)` completes a slot scan every slot
-    /// reports [`CaSlotStatus::Absent`], inserted module or not. Note
-    /// that after the CA_RESET issued on creation a module may need a
-    /// moment to report present again, so a short grace period on top of
-    /// this flag is still advisable before an `Absent` slot is treated
-    /// as empty.
+    /// Whether the physical slot states have been read at least once;
+    /// until then every slot reports [`CaSlotStatus::Absent`]
     pub fn slots_scanned(&self) -> bool {
         self.slots_scanned
     }
@@ -453,10 +447,6 @@ impl CiController {
 
     /// Asks the CAMs to close every open MMI dialogue
     ///
-    /// A CAM left with an MMI session open can refuse the next dialogue,
-    /// so a host closes the sessions on the way out. The requests are
-    /// written out right away and need no answer; the modules close the
-    /// sessions in response. The async driver calls this on shutdown.
     /// The last error is returned after every session was asked.
     pub fn close_all_mmi(&mut self) -> Result<()> {
         let mut result = Ok(());
@@ -592,25 +582,6 @@ impl CiController {
                 return Ok(Some(event));
             }
         }
-    }
-
-    /// Drains the queued events: [`CiController::poll_event`] as an
-    /// iterator, ending at the first empty poll. An error is yielded
-    /// once and ends the iteration; the next call starts over.
-    pub fn events(&mut self) -> impl Iterator<Item = Result<CaEvent>> + '_ {
-        let mut failed = false;
-        std::iter::from_fn(move || {
-            if failed {
-                return None;
-            }
-            match self.poll_event() {
-                Ok(event) => event.map(Ok),
-                Err(error) => {
-                    failed = true;
-                    Some(Err(error))
-                }
-            }
-        })
     }
 
     /// Advances physical slot checks, transport polling, timeouts and the
