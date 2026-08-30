@@ -7,7 +7,6 @@ pub mod modulator;
 pub mod net;
 pub mod scan;
 pub mod sysfs;
-pub mod text;
 
 mod fd;
 
@@ -62,4 +61,3 @@ pub use scan::{
     FeProbe,
     scan,
 };
-pub use text::DvbText;

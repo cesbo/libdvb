@@ -1,6 +1,6 @@
 [package]
 name = "libdvb"
-version = "0.11.1"
+version = "0.12.0"
 description = "Interface for DVB-API v5 devices in Linux"
 authors = ["Cesbo Developers Team <info@cesbo.com>"]
 license = "MIT"
@@ -13,8 +13,9 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2"
-libmpegts = "0.6"
+libmpegts = "0.7"
 nix = { version = "0.31", features = ["ioctl"] }
+textcode = "0.5"
 thiserror = "2"
 tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional = true }
 

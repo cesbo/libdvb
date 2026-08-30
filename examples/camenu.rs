@@ -39,9 +39,9 @@ use libdvb::{
     CaEvent,
     CaSlotStatus,
     CiController,
-    DvbText,
     ca::MmiMenu,
 };
+use textcode::dvb::DvbText;
 
 /// How long the loop sleeps between the controller ticks. `tick()` and
 /// `poll_event()` never block, so a plain sleep loop is enough; watching the

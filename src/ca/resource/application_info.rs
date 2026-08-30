@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use textcode::dvb::DvbText;
+
 use super::{
     super::{
         apdu::ApduTag,
@@ -15,12 +17,9 @@ use super::{
     ResourceContext,
     ResourceId,
 };
-use crate::{
-    error::{
-        Error,
-        Result,
-    },
-    text::DvbText,
+use crate::error::{
+    Error,
+    Result,
 };
 
 /// en50221 8.4.2.2: application_info object

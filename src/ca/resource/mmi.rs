@@ -9,6 +9,8 @@
 
 use std::collections::HashMap;
 
+use textcode::dvb::DvbText;
+
 use super::{
     super::{
         apdu,
@@ -19,12 +21,9 @@ use super::{
     ResourceContext,
     ResourceId,
 };
-use crate::{
-    error::{
-        Error,
-        Result,
-    },
-    text::DvbText,
+use crate::error::{
+    Error,
+    Result,
 };
 
 /// Cap for an MMI object reassembled from a *_more chain

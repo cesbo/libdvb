@@ -21,6 +21,8 @@ use std::{
     time::Instant,
 };
 
+use textcode::dvb::DvbText;
+
 use super::{
     apdu,
     apdu::ApduTag,
@@ -45,12 +47,9 @@ use super::{
         TransportRecv,
     },
 };
-use crate::{
-    error::{
-        Error,
-        Result,
-    },
-    text::DvbText,
+use crate::error::{
+    Error,
+    Result,
 };
 
 /// Highest number of concurrent sessions per slot
