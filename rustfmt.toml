@@ -1,6 +1,4 @@
-# Project style for all Rust code in the workspace. Both options are
-# unstable, so the fmt gate runs on the nightly toolchain:
-#   cargo +nightly fmt -p astra_rs -- --check
+# Usage: cargo +nightly fmt -- --check
 imports_layout = "Vertical"
 spaces_around_ranges = true
 group_imports = "StdExternalCrate"
