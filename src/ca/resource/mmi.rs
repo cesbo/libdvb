@@ -10,9 +10,11 @@
 use std::collections::HashMap;
 
 use super::{
-    super::apdu,
-    super::apdu::ApduTag,
-    super::session::CaEvent,
+    super::{
+        apdu,
+        apdu::ApduTag,
+        session::CaEvent,
+    },
     Resource,
     ResourceContext,
     ResourceId,
@@ -360,7 +362,10 @@ mod tests {
 
     #[test]
     fn test_build_answ() {
-        assert_eq!(build_answ(Some(b"1234")), vec![0x01, b'1', b'2', b'3', b'4']);
+        assert_eq!(
+            build_answ(Some(b"1234")),
+            vec![0x01, b'1', b'2', b'3', b'4']
+        );
         assert_eq!(build_answ(None), vec![0x00]);
     }
 

@@ -1528,9 +1528,7 @@ mod tests {
             }]
         );
 
-        session
-            .mmi_answer(0, session_id, Some(b"1234"))
-            .unwrap();
+        session.mmi_answer(0, session_id, Some(b"1234")).unwrap();
         let spdus = pump(&mut session, &mut cam);
         assert_eq!(
             spdus,

@@ -1,31 +1,27 @@
 # libdvb
 
-libdvb is an interface library for DVB API v5 devices in Linux.
+Rust interface to the Linux DVB API v5.
 
-Supports three types of delivery systems:
+Delivery systems:
 
 - Satellite: DVB-S, DVB-S2
 - Terrestrial: DVB-T, DVB-T2, ATSC, ISDB-T
 - Cable: DVB-C (Annex A, B, C)
-- DiSEqC 1.0
-- DiSEqC 1.1
-- EN 50494 - Unicable I
-- EN 50607 - Unicable II
 
-DVB-CI (EN 50221) support includes a runtime-neutral `CiController`, the
-link, transport and session layers, and Resource Manager, Application
-Information, Conditional Access Support, Host Control, Date-Time and
-high-level MMI resources, including CA PMT program selection from raw
-MPEG-TS PMT sections. The optional `tokio` feature adds `CiDriver` - an
-async event loop that owns a `CiController` and exposes a thread-safe
-command handle, an event stream and a CA_PMT readiness watch.
+SEC: DiSEqC 1.0/1.1, Unicable I (EN 50494), Unicable II (EN 50607).
+
+DVB-CI (EN 50221): runtime-neutral `CiController` with link, transport and
+session layers and the Resource Manager, Application Information,
+Conditional Access Support, Host Control, Date-Time and MMI resources.
+CA PMT is built from raw MPEG-TS PMT sections. The `tokio` feature adds
+`CiDriver`, an async event loop around `CiController`.
 
 ## FeDevice
 
-Frontend tuning uses the high-level `TuneRequest` enum, which lowers
-per-delivery-system parameters to a DVBv5 property command sequence.
+`TuneRequest` describes a tune per delivery system and is lowered to a
+DVBv5 property sequence.
 
-Example DVB-S2 tune:
+DVB-S2 example:
 
 ```rust
 use libdvb::{
@@ -39,10 +35,8 @@ use libdvb::{
 
 let fe = FeDevice::open_rw(0, 0)?;
 
-// Convert the transponder frequency through the LNB, set the polarization
-// voltage and the band tone, drive the DiSEqC equipment if there is any,
-// and get the frontend frequency back. This step always comes before the
-// tune: the tune request itself carries no SEC state.
+// SEC setup comes first: LNB conversion, voltage, tone, DiSEqC.
+// Returns the frontend frequency; the tune request carries no SEC state.
 let frequency_khz = fe.setup_sec(
     11044,
     Lnb::Universal {
@@ -64,21 +58,17 @@ let request = TuneRequest::DvbS2(DvbS2Tune {
 fe.tune(&request)?;
 ```
 
-`Lnb::auto` picks the LNB from the transponder frequency itself for a
-configuration that does not name one: an L band frequency passes through, the
-C and S bands invert around a single oscillator, and the Ku band gets the
-universal LNB above.
+`Lnb::auto` picks the LNB from the transponder frequency: L band passes
+through, C and S bands use a single oscillator, Ku band gets the universal
+LNB.
 
-`DTV_STREAM_ID` belongs to the two delivery systems that have a stream to
-select: `DvbS2Tune::mis` carries it for a multistream transponder, together
-with the PLS the stream is scrambled with, and `DvbT2Tune::stream_id` is the
-PLP of a T2 multiplex. A root PLS code is resolved to the Gold scrambling
-sequence index, `DTV_SCRAMBLING_SEQUENCE_INDEX` is left alone for the default
-root code 0, and it is dropped altogether on a DVB API older than 5.11.
+`DTV_STREAM_ID` is set by `DvbS2Tune::mis` (multistream ISI plus PLS) and
+`DvbT2Tune::stream_id` (PLP). A root PLS code is converted to the Gold
+sequence index; `DTV_SCRAMBLING_SEQUENCE_INDEX` is skipped for root code 0
+and on DVB API older than 5.11.
 
-The stream id reaches the property unchanged, so a driver-specific value can
-be passed through it as well - such as the bit that switches a DVB-S2
-frontend to delivering BBFrames instead of a transport stream:
+The stream id is passed through unchanged, so driver-specific values work
+too, such as the BBFrames bit of some DVB-S2 frontends:
 
 ```rust
 let request = TuneRequest::DvbS2(DvbS2Tune {
@@ -93,21 +83,15 @@ let request = TuneRequest::DvbS2(DvbS2Tune {
 });
 ```
 
-The low-level interface is still available: `TuneRequest::properties()`
-builds the typed `Vec<DtvProperty>` command sequence, which can be applied
-with `FeDevice::set_properties()`. The SEC step splits the same way -
-`sec_sequence()` builds the `Vec<SecCommand>` without touching the device,
-taking the wait times as an argument, and `FeDevice::run_sec_sequence()`
-applies it.
+Low-level access: `TuneRequest::properties()` returns the `Vec<DtvProperty>`
+for `FeDevice::set_properties()`; `sec_sequence()` returns the
+`Vec<SecCommand>` for `FeDevice::run_sec_sequence()`. Properties without a
+`DtvProperty` variant (`DTV_ISDBT_LAYER*`, custom API-version gating) go
+through `DtvPropertyRaw` and `FeDevice::set_properties_raw()`.
+`FeDevice::drain_events()` discards queued tune events and keeps the SEC
+state; `FeDevice::clear()` switches SEC off.
 
-An application that needs full control over the command sequence - property
-groups without a `DtvProperty` variant such as `DTV_ISDBT_LAYER*`, or its own
-API-version gating - builds `DtvPropertyRaw` values and submits them verbatim
-with `FeDevice::set_properties_raw()`. `FeDevice::drain_events()` discards the
-events a tune leaves queued without touching the SEC state, which
-`FeDevice::clear()` switches off.
-
-Frontend information is available through explicit accessors:
+Frontend information:
 
 ```rust
 let fe = FeDevice::open_ro(0, 0)?;
@@ -134,14 +118,14 @@ status.read(&fe)?;
 println!("{}", status.to_status_string());
 ```
 
-`FeStatus` also exposes parsed values via methods such as
-`delivery_system()`, `modulation()`, `signal_strength_decibel()`,
-`signal_strength()`, `snr_decibel()`, `snr()`, `ber()`, and `unc()`.
+`FeStatus` also exposes parsed values: `delivery_system()`, `modulation()`,
+`signal_strength()`, `signal_strength_decibel()`, `snr()`, `snr_decibel()`,
+`ber()`, `unc()`.
 
 ## Demux
 
-`DmxDevice` opens `/dev/dvb/adapterN/demuxM` and supports PES filters,
-buffer sizing, and explicit start/stop:
+`DmxDevice` opens `/dev/dvb/adapterN/demuxM`: PES filters, buffer size,
+start/stop.
 
 ```rust
 use libdvb::dmx::{
@@ -169,9 +153,8 @@ dmx.set_pes_filter(&filter)?;
 
 ## DVR
 
-`DvrDevice` opens `/dev/dvb/adapterN/dvrM` in blocking read-only mode.
-It implements `Read` and can resize the DVR buffer through the DVB
-`DMX_SET_BUFFER_SIZE` ioctl:
+`DvrDevice` opens `/dev/dvb/adapterN/dvrM` read-only and blocking. It
+implements `Read`; `set_buffer_size()` wraps `DMX_SET_BUFFER_SIZE`.
 
 ```rust
 use std::io::Read;
@@ -188,8 +171,7 @@ println!("Read {} bytes", size);
 
 ## NetDevice
 
-Network interfaces are removed automatically when `NetInterface` is dropped.
-Use `mac()` to read the interface MAC address.
+`NetInterface` is removed on drop; `mac()` returns the interface MAC address.
 
 ```rust
 use libdvb::NetDevice;
@@ -202,11 +184,9 @@ println!("MAC: {}", interface.mac());
 
 ## External CI (DigitalDevices / TBS)
 
-`CiTsDevice` opens the CI adapter TS pipe (`ciN` node on DigitalDevices,
-`secN` on TBS) in non-blocking mode. It is the data path of the adapter
-whose control path is `CaDevice` and the en50221 stack above it, and it is
-control plane only: the TS itself moves through the exposed file
-descriptors.
+`CiTsDevice` opens the CI adapter TS pipe (`ciN` on DigitalDevices, `secN`
+on TBS) in non-blocking mode. It only exposes the descriptors; the TS moves
+through them directly. The control path is `CaDevice` and the en50221 stack.
 
 ```rust
 use libdvb::CiTsDevice;
@@ -220,20 +200,18 @@ let fd_out = ci.fd_out(); // read descrambled TS from the CAM
 
 ## CI
 
-`CiController` manages multi-slot CAM insertion/removal, reset,
-`CREATE_TC`, transport polling, `RCV` and timeout recovery. It does not
-create a thread or own an event loop: integrate its file descriptor into
-the application runtime, drain `poll_event()` when readable and call
-`tick()` from a monotonic timer. A CAM reaches `CamStatus::Ready` after
-valid Application Information and CA Information replies; use `caids()`
-for the deduplicated slot list or `session_caids()` for one CA application.
+`CiController` handles CAM insertion/removal, reset, `CREATE_TC`, transport
+polling, `RCV` and timeout recovery for all slots. It owns no thread or
+event loop: poll its file descriptor from the application runtime, drain
+`poll_event()` when readable and call `tick()` from a timer. A CAM is
+`CamStatus::Ready` after the Application Information and CA Information
+replies; `caids()` returns the deduplicated slot list, `session_caids()` a
+single CA application.
 
-Program changes are paced: `set_program()` and `remove_program()` queue
-the change and `tick()` applies at most one per
-`CiControllerConfig::ca_pmt_interval` (20 s by default) once the CAM has
-confirmed the handshake at least one interval ago - many CAMs ignore or
-reject CA_PMT sent too early or too often. `ca_pmt_ready()` reports when
-the gate is open:
+`set_program()` and `remove_program()` queue changes; `tick()` applies at
+most one per `CiControllerConfig::ca_pmt_interval` (20 s by default),
+starting one interval after the CAM handshake - many CAMs reject CA_PMT sent
+too early or too often. `ca_pmt_ready()` reports whether the gate is open.
 
 ```rust,no_run
 use std::time::Instant;
@@ -245,7 +223,7 @@ let mut ci = CiController::open(0, 0)?;
 // Call periodically (for example, every 100 ms).
 ci.tick(Instant::now())?;
 
-// Drain after each tick and from the CA descriptor readable callback.
+// Drain after each tick and when the CA descriptor is readable.
 while let Some(event) = ci.poll_event()? {
     match event {
         CaEvent::SlotStatusChanged { slot_id, new, .. } => {
@@ -258,33 +236,28 @@ while let Some(event) = ci.poll_event()? {
     }
 }
 
-// A complete raw PMT section, including CRC32. The controller copies all
-// data it needs, so the input buffer may be reused after this call. The
-// change is queued and applied from tick() at the configured pace.
+// A complete raw PMT section, including CRC32. The data is copied, so the
+// buffer may be reused. The change is applied from tick().
 let raw_pmt: &[u8] = get_raw_pmt_section();
 let program_number = ci.set_program(raw_pmt)?;
 
-// Later, withdraw the service by its PMT program_number.
+// Later, withdraw the service by its program_number.
 ci.remove_program(program_number)?;
 
 # Ok::<(), libdvb::error::Error>(())
 ```
 
-Two runnable examples cover the CI stack: `examples/cainfo.rs` waits for
-the inserted CAMs to identify themselves, prints everything found and
-leaves; `examples/camenu.rs` gives interactive line-oriented access to the
-CAM menu.
+Examples: `examples/cainfo.rs` prints the inserted CAMs and exits;
+`examples/camenu.rs` is an interactive CAM menu.
 
 ### Async driver (feature `tokio`)
 
-With the `tokio` feature, `CiDriver` owns the event loop: it waits for CA
-link frames, computes its own `tick` deadlines, sits out a suspended link
-without polling the descriptor, and retries a failed global `CA_RESET`
-internally until it succeeds. Spawn the future on your runtime; the
-library never spawns tasks or owns a runtime. Commands may be sent from
-any thread through the cloneable handle; CA_PMT pacing and the readiness
-gate behave exactly as in the externally driven mode. Dropping every
-handle (or calling `shutdown()`) stops the loop and closes the device.
+`CiDriver` owns the event loop: it waits for CA link frames, schedules
+`tick()`, idles while the link is suspended and retries a failed `CA_RESET`.
+Spawn `run()` on your runtime - the library spawns nothing itself. The
+cloneable handle sends commands from any thread; CA_PMT pacing is the same
+as in the manual mode. Dropping all handles or calling `shutdown()` stops
+the loop and closes the device.
 
 ```rust,no_run
 use libdvb::{CiController, CiDriver, CiDriverEvent};
@@ -308,10 +281,9 @@ while let Some(event) = events.recv().await {
 
 ## File Descriptors
 
-Demux, DVR, frontend, and network device handles open in blocking mode by default.
-The CA device opens in non-blocking mode as required by the CI transport.
-All device handles implement `AsFd` and `AsRawFd`, so callers can pass them to APIs
-that operate on borrowed or raw file descriptors.
+All devices open in blocking mode except the CA device, which is
+non-blocking as required by the CI transport. Every handle implements
+`AsFd` and `AsRawFd`.
 
 ## Code Formatting
 

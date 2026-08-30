@@ -130,11 +130,12 @@ impl CaPmtPacer {
 
         let open = matches!(self.gate, Gate::Ready { .. });
         self.gate = Gate::Ready { stamp: now };
-        if open {
-            self.queue.pop_front()
-        } else {
-            None
+
+        if !open {
+            return None;
         }
+
+        self.queue.pop_front()
     }
 }
 

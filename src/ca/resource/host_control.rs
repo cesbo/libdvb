@@ -6,8 +6,10 @@
 //! with the application.
 
 use super::{
-    super::apdu::ApduTag,
-    super::session::CaEvent,
+    super::{
+        apdu::ApduTag,
+        session::CaEvent,
+    },
     Resource,
     ResourceContext,
     ResourceId,

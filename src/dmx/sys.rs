@@ -1,8 +1,10 @@
 use bitflags::bitflags;
 
-pub use dmx_input::*;
-pub use dmx_output::*;
-pub use dmx_ts_pes::*;
+pub use self::{
+    dmx_input::*,
+    dmx_output::*,
+    dmx_ts_pes::*,
+};
 
 bitflags! {
     /// Flags for the demux filter

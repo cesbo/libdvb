@@ -6,10 +6,8 @@
 //!
 //! - session open: the host sends profile_enq
 //! - profile (the module resource list): the host replies profile_change
-//! - profile_enq from the module: the host replies profile with the host
-//!   resource list
-//! - profile_change from the module: the host re-enquires with
-//!   profile_enq
+//! - profile_enq from the module: the host replies profile with the host resource list
+//! - profile_change from the module: the host re-enquires with profile_enq
 
 use super::{
     super::apdu::ApduTag,
