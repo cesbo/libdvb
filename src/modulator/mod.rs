@@ -6,19 +6,27 @@
 //! family exposes its own UAPI - and lives in a submodule per vendor:
 //!
 //! * [`dd`] - DigitalDevices (Octopus MOD / RESI / SDR cards).
+//! * [`tbs`] - TBS (tbsmod PCIe cards).
 //!
 //! Vendor UAPIs share ancestry but disagree: the same numeric property code
 //! can carry different meanings (or payload types) per vendor, so no
 //! cross-vendor device constants exist at this level on purpose.
 
 pub mod dd;
+pub mod tbs;
+
+use std::os::fd::RawFd;
 
 use crate::{
     error::{
         Error,
         Result,
     },
-    fe::sys::Modulation,
+    fe::sys::{
+        DtvProperties,
+        DtvPropertyRaw,
+        Modulation,
+    },
 };
 
 /// Number of 204-byte wire bytes per 188-byte TS packet: every DVB outer
@@ -105,6 +113,32 @@ impl DvbtGuard {
             DvbtGuard::G1_4 => 4,
         }
     }
+}
+
+/// Applies `(command, value)` DTV properties in order through
+/// `FE_SET_PROPERTY` on a mod node.
+fn set_properties(fd: RawFd, props: &[(u32, u32)]) -> Result<()> {
+    let raw: Vec<DtvPropertyRaw> = props
+        .iter()
+        .map(|&(cmd, data)| DtvPropertyRaw::new(cmd, data))
+        .collect();
+
+    let cmd = DtvProperties {
+        num: raw.len() as u32,
+        props: raw.as_ptr() as *mut _,
+    };
+
+    // FE_SET_PROPERTY
+    nix::ioctl_write_ptr!(
+        #[inline]
+        ioctl_call,
+        b'o',
+        82,
+        DtvProperties
+    );
+    unsafe { ioctl_call(fd, &cmd as *const _) }?;
+
+    Ok(())
 }
 
 /// Net TS bitrate of a DVB-C channel in bit/s:

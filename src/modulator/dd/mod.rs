@@ -38,15 +38,9 @@ use super::{
     DvbtConstellation,
     DvbtGuard,
 };
-use crate::{
-    error::{
-        Error,
-        Result,
-    },
-    fe::sys::{
-        DtvProperties,
-        DtvPropertyRaw,
-    },
+use crate::error::{
+    Error,
+    Result,
 };
 
 impl DvbtBandwidth {
@@ -219,27 +213,7 @@ impl ModDevice {
     /// `u.data64` (`MODULATOR_INPUT_BITRATE`, a Q32.32 bits/s value) need a
     /// dedicated call.
     pub fn set_properties(&self, props: &[(u32, u32)]) -> Result<()> {
-        let raw: Vec<DtvPropertyRaw> = props
-            .iter()
-            .map(|&(cmd, data)| DtvPropertyRaw::new(cmd, data))
-            .collect();
-
-        let cmd = DtvProperties {
-            num: raw.len() as u32,
-            props: raw.as_ptr() as *mut _,
-        };
-
-        // FE_SET_PROPERTY
-        nix::ioctl_write_ptr!(
-            #[inline]
-            ioctl_call,
-            b'o',
-            82,
-            DtvProperties
-        );
-        unsafe { ioctl_call(self.as_raw_fd(), &cmd as *const _) }?;
-
-        Ok(())
+        super::set_properties(self.as_raw_fd(), props)
     }
 
     /// Submits one MCI command to the card firmware. A nonzero result
