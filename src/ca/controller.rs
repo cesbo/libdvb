@@ -137,7 +137,7 @@ impl Default for CiControllerConfig {
             slot_status_interval: Duration::from_millis(250),
             transport_poll_interval: Duration::from_millis(100),
             create_tc_timeout: Duration::from_secs(2),
-            response_timeout: Duration::from_secs(2),
+            response_timeout: Duration::from_secs(10),
             retry_interval: Duration::from_secs(1),
             ca_pmt_interval: Duration::from_secs(20),
             ca_pmt_settle: Duration::from_secs(10),
