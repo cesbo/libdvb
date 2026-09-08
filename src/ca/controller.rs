@@ -366,7 +366,8 @@ impl CiController {
     /// [`CiControllerConfig::ca_pmt_interval`] once the readiness gate is open (see
     /// [`CiController::ca_pmt_ready`]). A queued select for the same program is replaced in
     /// place; a queued remove stays ahead of the new select. Once applied, the desired program
-    /// is retained across CAM session reconnections and sent after a matching CA_INFO arrives.
+    /// is retained across CAM session reconnections: every non-empty CA_INFO re-queues the
+    /// retained programs, so they reach the CAM again at the same pace instead of as one burst.
     /// Returns the `program_number` parsed from the PMT.
     pub fn set_program(&mut self, pmt_section: &[u8]) -> Result<u16> {
         let program = Program::parse(pmt_section)?;
@@ -1000,10 +1001,15 @@ impl CiController {
                         // an empty CAID list completes the protocol handshake
                         // but cannot descramble anything, so it does not open
                         // the CA_PMT gate
-                        if !caids.is_empty()
-                            && let Some(now) = self.last_tick
-                        {
-                            self.pacer.arm_ca_info(now);
+                        if !caids.is_empty() {
+                            if let Some(now) = self.last_tick {
+                                self.pacer.arm_ca_info(now);
+                            }
+                            // the announcing session holds no selection yet:
+                            // the retained programs go back through the pacer
+                            // instead of reaching the CAM as one burst right
+                            // after the handshake
+                            self.pacer.push_replay(self.session.programs().cloned());
                         }
                         self.recompute_cam_status(slot_id);
                         self.events.push_back(CaEvent::CaInfo {
@@ -2284,8 +2290,7 @@ mod tests {
         assert!(cam.recv().is_none());
 
         // A re-queued identical section is released on its own interval
-        // but dropped by the program registry as idempotent - nothing
-        // reaches the CAM.
+        // but the session already holds it - nothing reaches the CAM.
         controller.set_program(&first).unwrap();
         now += pace_step();
         controller.tick(now).unwrap();
@@ -2387,8 +2392,9 @@ mod tests {
         assert!(cam.recv().is_none());
 
         // Desired programs belong to the controller, not the transient CA
-        // session. Reopening the resource restores the remaining program
-        // right away: the registry synchronization is not paced.
+        // session. Reopening the resource replays the remaining program
+        // through the pacer: nothing on CA_INFO, the gate re-arms, the
+        // program follows one interval after the gate opens.
         cam.send_spdu(0, &[0x95, 0x02, (ca_session >> 8) as u8, ca_session as u8]);
         let _ = drain(&mut controller);
         assert_eq!(
@@ -2412,6 +2418,37 @@ mod tests {
         );
         cam.send_apdu(0, restored_session, ApduTag::CA_INFO, &caid.to_be_bytes());
         let _ = drain(&mut controller);
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(controller.ca_pmt_ready());
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                restored_session,
+                &second,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        // A CA application re-announcing itself on the live session forgets
+        // its selection as well: the same paced replay, no burst.
+        cam.send_apdu(0, restored_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(cam.recv().is_none());
+        now += pace_step();
+        controller.tick(now).unwrap();
         assert_eq!(
             cam.recv().unwrap(),
             ca_pmt_frame(
@@ -2558,9 +2595,9 @@ mod tests {
         let _ = drain(&mut controller);
         state.lock().unwrap().fail_slot_info = false;
 
-        // after recovery and a new handshake the retained program is
-        // restored by the unpaced registry synchronization, then the
-        // queued change is released at the usual pace
+        // after recovery and a new handshake nothing is sent on CA_INFO:
+        // the queued change stays first in line, the retained program is
+        // replayed behind it, both at the usual pace
         now += pacing_config().retry_interval;
         activate(&mut controller, &mut cam, &state, 0, now);
         ack_initial_poll(&mut controller, &mut cam, now);
@@ -2573,19 +2610,7 @@ mod tests {
         );
         cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
         let _ = drain(&mut controller);
-        assert_eq!(
-            cam.recv().unwrap(),
-            ca_pmt_frame(
-                0,
-                ca_session,
-                &first,
-                caid,
-                CaPmtListManagement::Only,
-                CaPmtCommand::OkDescrambling,
-            )
-        );
-        cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert!(cam.recv().is_none());
 
         now += pace_step();
         controller.tick(now).unwrap();
@@ -2599,6 +2624,22 @@ mod tests {
                 0,
                 ca_session,
                 &second,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert!(drain(&mut controller).is_empty());
+
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &first,
                 caid,
                 CaPmtListManagement::Add,
                 CaPmtCommand::OkDescrambling,

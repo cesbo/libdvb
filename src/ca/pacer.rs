@@ -93,6 +93,24 @@ impl CaPmtPacer {
         self.queue.push_back(CaPmtChange::Remove(program_number));
     }
 
+    /// Queues a select for every program without a queued change: the
+    /// replay of the desired programs after CA_INFO must not override
+    /// what the host queued meanwhile (a newer select stays, a pending
+    /// remove must not resurrect the program)
+    pub fn push_replay(&mut self, programs: impl IntoIterator<Item = Program>) {
+        for program in programs {
+            let program_number = program.program_number();
+            if self
+                .queue
+                .iter()
+                .any(|change| change.program_number() == program_number)
+            {
+                continue;
+            }
+            self.queue.push_back(CaPmtChange::Set(program));
+        }
+    }
+
     /// (Re)arms the readiness countdown with the extra settle hold: some
     /// CAMs (NDS Videoguard) reject the CA handshake continuation right
     /// after identification
@@ -200,6 +218,20 @@ mod tests {
         pacer.push_remove(100);
 
         assert_eq!(queued(&pacer), vec![set(200, 2), CaPmtChange::Remove(100)]);
+    }
+
+    #[test]
+    fn replay_skips_programs_with_a_queued_change() {
+        let mut pacer = pacer();
+        pacer.push_set(program(100, 5));
+        pacer.push_remove(200);
+
+        pacer.push_replay([program(100, 1), program(200, 2), program(300, 3)]);
+
+        assert_eq!(
+            queued(&pacer),
+            vec![set(100, 5), CaPmtChange::Remove(200), set(300, 3)]
+        );
     }
 
     #[test]

@@ -418,6 +418,11 @@ impl CiSession {
             .remove_program(&mut self.transport, program_number)
     }
 
+    /// Desired programs retained across CA sessions, in program number order
+    pub(super) fn programs(&self) -> impl Iterator<Item = &Program> {
+        self.resources.conditional_access.programs()
+    }
+
     pub(crate) fn has_ca_info(&self, slot_id: u8) -> bool {
         self.sessions.iter().enumerate().any(|(index, session)| {
             session.as_ref().is_some_and(|session| {

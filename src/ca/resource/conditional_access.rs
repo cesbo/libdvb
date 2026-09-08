@@ -44,8 +44,8 @@ struct ConditionalAccessSession {
 /// Conditional Access Support resource
 pub struct ConditionalAccessResource {
     sessions: HashMap<u16, ConditionalAccessSession>,
-    /// Desired programs outlive resource sessions so CAM reconnection can
-    /// restore the complete selection after the next CA_INFO.
+    /// Desired programs outlive resource sessions: after a CA_INFO the
+    /// controller replays them through the CA_PMT pacer.
     programs: BTreeMap<u16, Program>,
 }
 
@@ -65,17 +65,21 @@ impl ConditionalAccessResource {
             .and_then(|session| session.caids.as_deref())
     }
 
+    /// Desired programs, in program number order
+    pub fn programs(&self) -> impl Iterator<Item = &Program> {
+        self.programs.values()
+    }
+
     /// Adds or replaces a desired program and updates every CA application
     /// whose confirmed CAID list matches at least one descriptor in its PMT.
+    /// A session that already holds this exact program is left alone, so a
+    /// replayed or duplicate select reaches only the sessions missing it.
     pub fn set_program(
         &mut self,
         transport: &mut CiTransport,
         program: Program,
     ) -> Result<Vec<u8>> {
         let program_number = program.program_number();
-        if self.programs.get(&program_number) == Some(&program) {
-            return Ok(Vec::new());
-        }
         self.programs.insert(program_number, program.clone());
 
         let mut session_ids: Vec<u16> = self.sessions.keys().copied().collect();
@@ -88,6 +92,9 @@ impl ConditionalAccessResource {
                 continue;
             };
             let previous = session.selected.get(&program_number).cloned();
+            if previous.as_ref() == Some(&program) {
+                continue;
+            }
             let list_management = if previous.is_some() {
                 CaPmtListManagement::Update
             } else if session.selected.is_empty() {
@@ -173,51 +180,6 @@ impl ConditionalAccessResource {
         touched_slots.dedup();
         Ok(touched_slots)
     }
-
-    fn synchronize_session(
-        programs: &BTreeMap<u16, Program>,
-        session: &mut ConditionalAccessSession,
-        ctx: &mut ResourceContext<'_>,
-        caids: Vec<u16>,
-    ) -> Result<()> {
-        let old_caids = session.caids.replace(caids.clone());
-        let previous = std::mem::take(&mut session.selected);
-        let mut selected = BTreeMap::new();
-
-        for (&program_number, program) in programs {
-            let list_management = if selected.is_empty() {
-                CaPmtListManagement::Only
-            } else {
-                CaPmtListManagement::Add
-            };
-            if let Some(body) =
-                program.build_ca_pmt(&caids, list_management, CaPmtCommand::OkDescrambling)?
-            {
-                ctx.send_apdu(ApduTag::CA_PMT, &body)?;
-                selected.insert(program_number, program.clone());
-            }
-        }
-
-        // A changed CA_INFO can invalidate programs selected using the old
-        // CAID list. Explicitly withdraw them if no replacement selection
-        // was possible.
-        if selected.is_empty()
-            && let Some(old_caids) = old_caids
-        {
-            for (_, program) in previous {
-                if let Some(body) = program.build_ca_pmt(
-                    &old_caids,
-                    CaPmtListManagement::Update,
-                    CaPmtCommand::NotSelected,
-                )? {
-                    ctx.send_apdu(ApduTag::CA_PMT, &body)?;
-                }
-            }
-        }
-
-        session.selected = selected;
-        Ok(())
-    }
 }
 
 fn parse_ca_info(slot_id: u8, body: &[u8]) -> Result<Vec<u16>> {
@@ -263,7 +225,11 @@ impl Resource for ConditionalAccessResource {
                         ctx.slot_id, ctx.session_id
                     ))
                 })?;
-                Self::synchronize_session(&self.programs, session, ctx, caids.clone())?;
+                // a CA application that (re)announces itself holds no
+                // selection the host can rely on; nothing is sent here: the
+                // controller replays the desired programs through the pacer
+                session.caids = Some(caids.clone());
+                session.selected.clear();
                 ctx.event(CaEvent::CaInfo {
                     slot_id: ctx.slot_id,
                     session_id: ctx.session_id,
