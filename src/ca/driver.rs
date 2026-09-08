@@ -66,7 +66,7 @@ pub enum CiDriverEvent {
 enum Command {
     SetProgram(Program),
     RemoveProgram(u16),
-    SetCaPmtInterval(Duration),
+    SetCaPmtDelay(Duration),
     EnterMenu {
         slot_id: u8,
     },
@@ -126,10 +126,10 @@ impl CiDriverHandle {
         Ok(())
     }
 
-    /// Changes the CA_PMT pacing interval on the live controller;
-    /// effective from the next driver tick
-    pub fn set_ca_pmt_interval(&self, interval: Duration) {
-        self.send(Command::SetCaPmtInterval(interval));
+    /// Changes the hold between the CAM handshake and the first CA_PMT on
+    /// the live controller; effective from the next driver tick
+    pub fn set_ca_pmt_delay(&self, delay: Duration) {
+        self.send(Command::SetCaPmtDelay(delay));
     }
 
     /// Asks the CAM to enter its menu. Failures (for example the slot is
@@ -418,7 +418,7 @@ impl CiDriver {
             Command::SetProgram(program) => self.controller.queue_program(program),
             // program_number != 0 verified by the handle
             Command::RemoveProgram(pnr) => drop(self.controller.remove_program(pnr)),
-            Command::SetCaPmtInterval(interval) => self.controller.set_ca_pmt_interval(interval),
+            Command::SetCaPmtDelay(delay) => self.controller.set_ca_pmt_delay(delay),
             Command::EnterMenu { slot_id } => {
                 self.slot_command("enter_menu", |c| c.enter_menu(slot_id))
             }
@@ -842,8 +842,8 @@ mod tests {
         let armed = Instant::now();
         assert_eq!(handle.set_program(&section).unwrap(), 100);
 
-        // the gate arms first: nothing reaches the CAM before the
-        // interval elapses twice (arm pass + release pass)
+        // the gate arms first: nothing reaches the CAM before the delay
+        // (arm pass) and one interval (release pass) elapse
         cam_quiet(&mut cam, &mut events, Duration::from_millis(250)).await;
         assert_eq!(
             cam_recv(&mut cam).await,
@@ -856,14 +856,12 @@ mod tests {
                 CaPmtCommand::OkDescrambling,
             )
         );
-        // the two-interval bound, measured from the CA_INFO confirmation:
-        // the gate advances only on tick passes strictly past the stamp,
-        // so a correctly paced release (arm pass, then release pass)
-        // lands at or above two intervals, while a release on the
-        // arm-to-ready transition pass lands near one interval
+        // measured from the CA_INFO confirmation: a release on the
+        // arm-to-ready pass would land near the delay; a paced one (arm
+        // pass, then release pass) lands strictly past delay + interval
         let elapsed = armed.elapsed();
         assert!(
-            elapsed >= pacing_config().ca_pmt_interval * 2,
+            elapsed >= pacing_config().ca_pmt_delay + pacing_config().ca_pmt_interval,
             "first release after {elapsed:?}"
         );
         cam.send_status(0, false);
@@ -1177,16 +1175,24 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn set_ca_pmt_interval_applies_live() {
+    async fn set_ca_pmt_delay_applies_live() {
         let (controller, mut cam, state) = pair_with(1, pacing_config());
         let (handle, mut events, _task) = start(controller);
         activate_async(&mut cam, &state, &mut events, 0).await;
         ack_initial_poll_async(&mut cam).await;
 
+        // the new hold applies to the handshake that follows on the live
+        // controller: first release at delay + interval, not sooner
+        let delay = Duration::from_millis(600);
+        handle.set_ca_pmt_delay(delay);
         let caid = 0x0B00_u16;
         let section = pmt_section(100, 1, caid);
         let ca_session = arm_ca_handshake_async(&mut cam, &mut events, caid).await;
+        let armed = Instant::now();
         handle.set_program(&section).unwrap();
+
+        let bound = delay + pacing_config().ca_pmt_interval;
+        cam_quiet(&mut cam, &mut events, bound - Duration::from_millis(50)).await;
         assert_eq!(
             cam_recv(&mut cam).await,
             ca_pmt_frame(
@@ -1198,31 +1204,10 @@ mod tests {
                 CaPmtCommand::OkDescrambling,
             )
         );
-        cam.send_status(0, false);
-        let released = Instant::now();
-
-        // the new interval paces the next release
-        let interval = Duration::from_millis(600);
-        handle.set_ca_pmt_interval(interval);
-        let second = pmt_section(200, 2, caid);
-        handle.set_program(&second).unwrap();
-
-        cam_quiet(&mut cam, &mut events, Duration::from_millis(550)).await;
-        assert_eq!(
-            cam_recv(&mut cam).await,
-            ca_pmt_frame(
-                0,
-                ca_session,
-                &second,
-                caid,
-                CaPmtListManagement::Add,
-                CaPmtCommand::OkDescrambling,
-            )
-        );
-        let elapsed = released.elapsed();
-        assert!(elapsed >= interval, "released after {elapsed:?}");
+        let elapsed = armed.elapsed();
+        assert!(elapsed >= bound, "released after {elapsed:?}");
         assert!(
-            elapsed <= interval + Duration::from_millis(110),
+            elapsed <= bound + TICK_PERIOD_MAX * 2 + Duration::from_millis(10),
             "released after {elapsed:?}"
         );
     }

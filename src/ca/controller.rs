@@ -121,9 +121,11 @@ pub struct CiControllerConfig {
     pub response_timeout: Duration,
     /// Delay before retrying after a successful global reset
     pub retry_interval: Duration,
-    /// Minimum interval between the applications of queued CA_PMT
-    /// changes; also the delay between the confirmed CA handshake and the
-    /// first CA_PMT (see [`CiController::set_program`])
+    /// Hold between the confirmed CA handshake and the first CA_PMT: the
+    /// module needs time to finish its own start-up after announcing itself
+    /// (see [`CiController::set_program`])
+    pub ca_pmt_delay: Duration,
+    /// Minimum interval between two CA_PMT commands once the hold is over
     pub ca_pmt_interval: Duration,
     /// Extra hold after APPLICATION_INFO before the CA_PMT readiness
     /// countdown starts: some CAMs (NDS Videoguard) reject CA_PMT sent
@@ -139,7 +141,8 @@ impl Default for CiControllerConfig {
             create_tc_timeout: Duration::from_secs(2),
             response_timeout: Duration::from_secs(10),
             retry_interval: Duration::from_secs(1),
-            ca_pmt_interval: Duration::from_secs(20),
+            ca_pmt_delay: Duration::from_secs(20),
+            ca_pmt_interval: Duration::from_secs(1),
             ca_pmt_settle: Duration::from_secs(10),
         }
     }
@@ -201,9 +204,7 @@ impl ControllerIo for KernelControllerIo {
 /// `tick(now)` performs status checks, transport polling and timeout work.
 ///
 /// Program changes ([`CiController::set_program`] and
-/// [`CiController::remove_program`]) are queued and applied from `tick`
-/// at the pace set by [`CiControllerConfig::ca_pmt_interval`] once
-/// [`CiController::ca_pmt_ready`] reports the CAM handshake complete.
+/// [`CiController::remove_program`]) are queued and paced from `tick`.
 ///
 /// Linux `CA_RESET` resets the whole CA interface rather than one slot.
 /// Consequently recovery of one failed slot clears the transport and
@@ -285,7 +286,11 @@ impl CiController {
         io: Box<dyn ControllerIo>,
     ) -> Self {
         let slots_num = session.transport().slots_num();
-        let pacer = CaPmtPacer::new(config.ca_pmt_interval, config.ca_pmt_settle);
+        let pacer = CaPmtPacer::new(
+            config.ca_pmt_delay,
+            config.ca_pmt_interval,
+            config.ca_pmt_settle,
+        );
         CiController {
             session,
             slots: (0 .. slots_num).map(|_| ControllerSlot::new()).collect(),
@@ -362,9 +367,10 @@ impl CiController {
     /// validated immediately; the controller owns everything it needs, so the input buffer may
     /// be reused after this call.
     ///
-    /// The change is queued and paced: `tick(now)` applies at most one queued change per
-    /// [`CiControllerConfig::ca_pmt_interval`] once the readiness gate is open (see
-    /// [`CiController::ca_pmt_ready`]). A queued select for the same program is replaced in
+    /// The change is queued and paced: `tick(now)` opens the readiness gate
+    /// [`CiControllerConfig::ca_pmt_delay`] after the CAM handshake (see
+    /// [`CiController::ca_pmt_ready`]) and then applies at most one queued change per
+    /// [`CiControllerConfig::ca_pmt_interval`]. A queued select for the same program is replaced in
     /// place; a queued remove stays ahead of the new select. Once applied, the desired program
     /// is retained across CAM session reconnections: every non-empty CA_INFO re-queues the
     /// retained programs, so they reach the CAM again at the same pace instead of as one burst.
@@ -393,17 +399,19 @@ impl CiController {
     }
 
     /// Whether the CA_PMT readiness gate is open: a CAM confirmed the handshake
-    /// (APPLICATION_INFO or a non-empty CA_INFO) at least one pacing interval ago and queued
-    /// program changes are being applied. An empty CA_INFO completes the protocol handshake but
-    /// cannot descramble anything, so it does not open the gate. The gate closes on a global
-    /// recovery or [`CiController::reset`]; queued changes are kept for the next handshake.
+    /// (APPLICATION_INFO or a non-empty CA_INFO), the hold elapsed (see
+    /// [`CiController::set_program`]) and queued program changes are being applied. An empty
+    /// CA_INFO completes the protocol handshake but cannot descramble anything, so it does not
+    /// open the gate. The gate closes on a global recovery or [`CiController::reset`]; queued
+    /// changes are kept for the next handshake.
     pub fn ca_pmt_ready(&self) -> bool {
         self.pacer.ready()
     }
 
-    /// Changes the CA_PMT pacing interval; effective from the next `tick`
-    pub fn set_ca_pmt_interval(&mut self, interval: Duration) {
-        self.pacer.set_interval(interval);
+    /// Changes the hold between the CAM handshake and the first CA_PMT; effective from the next
+    /// `tick`
+    pub fn set_ca_pmt_delay(&mut self, delay: Duration) {
+        self.pacer.set_delay(delay);
     }
 
     /// Asks the CAM to enter its menu
@@ -1327,13 +1335,15 @@ pub(crate) mod test_support {
             response_timeout: Duration::from_millis(100),
             retry_interval: Duration::from_millis(50),
             // out of reach: tests of the other machinery never open the gate
+            ca_pmt_delay: Duration::from_secs(3600),
             ca_pmt_interval: Duration::from_secs(3600),
             ca_pmt_settle: Duration::ZERO,
         }
     }
 
-    /// Configuration for the CA_PMT pacing tests: the pacing interval is
-    /// the only running deadline, everything else is out of reach.
+    /// Configuration for the CA_PMT pacing tests: the pacing clock (delay
+    /// == interval, so `pace_step` fits both) and settle are the only
+    /// running deadlines, everything else is out of reach.
     pub fn pacing_config() -> CiControllerConfig {
         CiControllerConfig {
             slot_status_interval: Duration::ZERO,
@@ -1341,12 +1351,14 @@ pub(crate) mod test_support {
             create_tc_timeout: Duration::from_secs(3600),
             response_timeout: Duration::from_secs(3600),
             retry_interval: Duration::from_millis(50),
+            ca_pmt_delay: Duration::from_millis(200),
             ca_pmt_interval: Duration::from_millis(200),
             ca_pmt_settle: Duration::from_millis(300),
         }
     }
 
-    /// One step of the pacing clock: strictly past the interval boundary
+    /// One step of the pacing clock: strictly past the delay or interval
+    /// boundary
     pub fn pace_step() -> Duration {
         pacing_config().ca_pmt_interval + Duration::from_millis(1)
     }
@@ -2490,7 +2502,7 @@ mod tests {
         controller.tick(now + pace_step()).unwrap();
         assert!(!controller.ca_pmt_ready());
         controller
-            .tick(now + settle + pacing_config().ca_pmt_interval)
+            .tick(now + settle + pacing_config().ca_pmt_delay)
             .unwrap();
         assert!(!controller.ca_pmt_ready());
         controller.tick(now + settle + pace_step()).unwrap();

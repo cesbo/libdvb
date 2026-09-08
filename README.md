@@ -208,10 +208,11 @@ event loop: poll its file descriptor from the application runtime, drain
 replies; `caids()` returns the deduplicated slot list, `session_caids()` a
 single CA application.
 
-`set_program()` and `remove_program()` queue changes; `tick()` applies at
-most one per `CiControllerConfig::ca_pmt_interval` (20 s by default),
-starting one interval after the CAM handshake - many CAMs reject CA_PMT sent
-too early or too often. `ca_pmt_ready()` reports whether the gate is open.
+`set_program()` and `remove_program()` queue changes; `tick()` holds them
+for `CiControllerConfig::ca_pmt_delay` (20 s by default) after the CAM
+handshake and then applies at most one per `ca_pmt_interval` (1 s) - many
+CAMs reject CA_PMT sent too early or too often. `ca_pmt_ready()` reports
+whether the gate is open.
 
 ```rust,no_run
 use std::time::Instant;

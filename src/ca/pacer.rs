@@ -3,9 +3,9 @@
 //!
 //! CAMs are sensitive to CA_PMT timing: many ignore or reject a command
 //! sent right after the CA handshake, and rapid successive commands can
-//! wedge the application. The pacer holds queued changes until one full
-//! interval has passed since the confirmed handshake and then releases at
-//! most one change per interval.
+//! wedge the application. The pacer holds queued changes for `delay`
+//! after the confirmed handshake and then releases at most one change per
+//! `interval`.
 
 use std::{
     collections::VecDeque,
@@ -33,15 +33,14 @@ impl CaPmtChange {
     }
 }
 
-/// CA_PMT readiness gate. `stamp` is the start of the current pacing
-/// interval; the gate advances once per interval after it.
+/// CA_PMT readiness gate; `stamp` is the start of the current hold
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Gate {
     /// No confirmed CAM handshake
     NotReady,
-    /// APPLICATION_INFO or a non-empty CA_INFO arrived; one full interval
-    /// after `stamp` the CAM counts as ready (no change is released on
-    /// the transition pass)
+    /// APPLICATION_INFO or a non-empty CA_INFO arrived; `delay` after
+    /// `stamp` the CAM counts as ready (no change is released on the
+    /// transition pass)
     Armed { stamp: Instant },
     /// The CAM accepts CA_PMT; one queued change is released per interval
     Ready { stamp: Instant },
@@ -49,6 +48,7 @@ enum Gate {
 
 /// Paced, deduplicated CA_PMT change queue
 pub(super) struct CaPmtPacer {
+    delay: Duration,
     interval: Duration,
     settle: Duration,
     gate: Gate,
@@ -56,8 +56,9 @@ pub(super) struct CaPmtPacer {
 }
 
 impl CaPmtPacer {
-    pub fn new(interval: Duration, settle: Duration) -> Self {
+    pub fn new(delay: Duration, interval: Duration, settle: Duration) -> Self {
         CaPmtPacer {
+            delay,
             interval,
             settle,
             gate: Gate::NotReady,
@@ -65,9 +66,10 @@ impl CaPmtPacer {
         }
     }
 
-    /// Changes the pacing interval; effective from the next poll
-    pub fn set_interval(&mut self, interval: Duration) {
-        self.interval = interval;
+    /// Changes the hold between the confirmed handshake and the first
+    /// release; effective from the next poll
+    pub fn set_delay(&mut self, delay: Duration) {
+        self.delay = delay;
     }
 
     /// Whether the readiness gate is open: the CAM accepts CA_PMT
@@ -129,18 +131,19 @@ impl CaPmtPacer {
         self.gate = Gate::NotReady;
     }
 
-    /// One pacing pass. Nothing happens within one interval of the gate
+    /// One pacing pass. Nothing happens within the current hold of the gate
     /// stamp. On a pass that clears the gate the stamp always advances (a
-    /// change never waits longer than about one interval), and: `Armed`
-    /// becomes `Ready` without releasing a change, `Ready` releases at
-    /// most one queued change.
+    /// change never waits longer than about one hold), and: `Armed` becomes
+    /// `Ready` without releasing a change, `Ready` releases at most one
+    /// queued change.
     pub fn poll(&mut self, now: Instant) -> Option<CaPmtChange> {
-        let stamp = match self.gate {
+        let (stamp, hold) = match self.gate {
             Gate::NotReady => return None,
-            Gate::Armed { stamp } | Gate::Ready { stamp } => stamp,
+            Gate::Armed { stamp } => (stamp, self.delay),
+            Gate::Ready { stamp } => (stamp, self.interval),
         };
         let gated = stamp
-            .checked_add(self.interval)
+            .checked_add(hold)
             .is_none_or(|deadline| now <= deadline);
         if gated {
             return None;
@@ -167,7 +170,8 @@ mod tests {
 
     use super::*;
 
-    const INTERVAL: Duration = Duration::from_secs(20);
+    const DELAY: Duration = Duration::from_secs(20);
+    const INTERVAL: Duration = Duration::from_secs(5);
     const SETTLE: Duration = Duration::from_secs(10);
 
     fn program(program_number: u16, version: u8) -> Program {
@@ -191,7 +195,7 @@ mod tests {
     }
 
     fn pacer() -> CaPmtPacer {
-        CaPmtPacer::new(INTERVAL, SETTLE)
+        CaPmtPacer::new(DELAY, INTERVAL, SETTLE)
     }
 
     fn queued(pacer: &CaPmtPacer) -> Vec<CaPmtChange> {
@@ -245,7 +249,7 @@ mod tests {
 
     #[test]
     fn poll_not_ready_never_releases() {
-        let mut pacer = CaPmtPacer::new(Duration::ZERO, Duration::ZERO);
+        let mut pacer = CaPmtPacer::new(Duration::ZERO, Duration::ZERO, Duration::ZERO);
         pacer.push_set(program(100, 1));
 
         assert_eq!(pacer.poll(Instant::now()), None);
@@ -260,12 +264,12 @@ mod tests {
         pacer.push_set(program(100, 1));
         pacer.arm_ca_info(start);
 
-        // still inside the interval (the boundary itself stays gated)
-        assert_eq!(pacer.poll(start + INTERVAL), None);
+        // still inside the delay (the boundary itself stays gated)
+        assert_eq!(pacer.poll(start + DELAY), None);
         assert!(!pacer.ready());
 
-        // past the interval: transition only, no change on this pass
-        assert_eq!(pacer.poll(start + INTERVAL + Duration::from_secs(1)), None);
+        // past the delay: transition only, no change on this pass
+        assert_eq!(pacer.poll(start + DELAY + Duration::from_secs(1)), None);
         assert!(pacer.ready());
         assert_eq!(pacer.queue.len(), 1);
     }
@@ -278,7 +282,7 @@ mod tests {
         pacer.push_set(program(200, 2));
         pacer.arm_ca_info(start);
 
-        let t1 = start + INTERVAL + Duration::from_secs(1);
+        let t1 = start + DELAY + Duration::from_secs(1);
         assert_eq!(pacer.poll(t1), None);
 
         let t2 = t1 + INTERVAL + Duration::from_secs(1);
@@ -297,7 +301,7 @@ mod tests {
         let start = Instant::now();
         pacer.arm_ca_info(start);
 
-        let t1 = start + INTERVAL + Duration::from_secs(1);
+        let t1 = start + DELAY + Duration::from_secs(1);
         assert_eq!(pacer.poll(t1), None);
         assert!(pacer.ready());
 
@@ -316,11 +320,11 @@ mod tests {
         let start = Instant::now();
         pacer.arm_application_info(start);
 
-        assert_eq!(pacer.poll(start + SETTLE + INTERVAL), None);
+        assert_eq!(pacer.poll(start + SETTLE + DELAY), None);
         assert!(!pacer.ready());
 
         assert_eq!(
-            pacer.poll(start + SETTLE + INTERVAL + Duration::from_secs(1)),
+            pacer.poll(start + SETTLE + DELAY + Duration::from_secs(1)),
             None
         );
         assert!(pacer.ready());
@@ -333,7 +337,7 @@ mod tests {
         pacer.arm_application_info(start);
         pacer.arm_ca_info(start);
 
-        assert_eq!(pacer.poll(start + INTERVAL + Duration::from_secs(1)), None);
+        assert_eq!(pacer.poll(start + DELAY + Duration::from_secs(1)), None);
         assert!(pacer.ready());
     }
 
@@ -343,28 +347,35 @@ mod tests {
         let start = Instant::now();
         pacer.push_set(program(100, 1));
         pacer.arm_ca_info(start);
-        assert_eq!(pacer.poll(start + INTERVAL + Duration::from_secs(1)), None);
+        assert_eq!(pacer.poll(start + DELAY + Duration::from_secs(1)), None);
         assert!(pacer.ready());
 
         pacer.reset_gate();
 
         assert!(!pacer.ready());
-        assert_eq!(pacer.poll(start + INTERVAL * 10), None);
+        assert_eq!(pacer.poll(start + DELAY * 10), None);
         assert_eq!(pacer.queue.len(), 1);
     }
 
     #[test]
-    fn set_interval_takes_effect_next_poll() {
+    fn set_delay_takes_effect_next_poll() {
         let mut pacer = pacer();
         let start = Instant::now();
         pacer.push_set(program(100, 1));
         pacer.arm_ca_info(start);
-        let t1 = start + INTERVAL + Duration::from_secs(1);
+        let t1 = start + Duration::from_secs(2);
         assert_eq!(pacer.poll(t1), None);
+        assert!(!pacer.ready());
 
-        pacer.set_interval(Duration::from_secs(1));
+        pacer.set_delay(Duration::from_secs(1));
 
-        let t2 = t1 + Duration::from_secs(2);
-        assert_eq!(pacer.poll(t2), Some(set(100, 1)));
+        // the shorter delay has already elapsed: the gate opens on this
+        // pass, the change follows one interval later
+        assert_eq!(pacer.poll(t1), None);
+        assert!(pacer.ready());
+        assert_eq!(
+            pacer.poll(t1 + INTERVAL + Duration::from_secs(1)),
+            Some(set(100, 1))
+        );
     }
 }
