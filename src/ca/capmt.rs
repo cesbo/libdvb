@@ -14,18 +14,67 @@ use crate::error::{
 /// en50221 8.4.3.4: ca_pmt_list_management.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub(super) enum CaPmtListManagement {
+pub enum CaPmtListManagement {
+    /// the program replaces the whole selection of the CA application
     Only = 0x03,
+    /// the program joins the current selection
     Add = 0x04,
+    /// the program is already selected: new PMT version or withdrawal
     Update = 0x05,
 }
 
 /// en50221 8.4.3.4: ca_pmt_cmd_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub(super) enum CaPmtCommand {
+pub enum CaPmtCommand {
+    /// descramble the program
     OkDescrambling = 0x01,
+    /// stop descrambling the program
     NotSelected = 0x04,
+}
+
+/// en50221 8.4.3.5: ca_pmt_reply, the verdict of a CA application on a
+/// CA_PMT. Mandatory only as the answer to a `query` command; some modules
+/// send it after `ok_descrambling` as well.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaPmtReply {
+    pub program_number: u16,
+    pub version: u8,
+    /// Program-level CA_enable (Table 8.4.3.5: 0x01 descrambling possible,
+    /// 0x02/0x03 possible after a purchase/technical dialogue, 0x71 no
+    /// entitlement, 0x73 technical reasons); `None` when the module gave no
+    /// program-level verdict
+    pub ca_enable: Option<u8>,
+    /// Per elementary stream: (elementary_PID, CA_enable)
+    pub streams: Vec<(u16, Option<u8>)>,
+}
+
+impl CaPmtReply {
+    /// Parses a ca_pmt_reply body (tag and length already stripped)
+    pub fn parse(body: &[u8]) -> Result<Self> {
+        if body.len() < 4 || !(body.len() - 4).is_multiple_of(3) {
+            return Err(Error::InvalidData(format!(
+                "ca_pmt_reply has an invalid body length {}",
+                body.len()
+            )));
+        }
+
+        let ca_enable = |byte: u8| (byte & 0x80 != 0).then_some(byte & 0x7F);
+        let streams = body[4 ..]
+            .chunks_exact(3)
+            .map(|bytes| {
+                let pid = ((u16::from(bytes[0]) & 0x1F) << 8) | u16::from(bytes[1]);
+                (pid, ca_enable(bytes[2]))
+            })
+            .collect();
+
+        Ok(CaPmtReply {
+            program_number: (u16::from(body[0]) << 8) | u16::from(body[1]),
+            version: (body[2] >> 1) & 0x1F,
+            ca_enable: ca_enable(body[3]),
+            streams,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,6 +352,23 @@ mod tests {
 
         assert_eq!(body[0], CaPmtListManagement::Update as u8);
         assert_eq!(body[6], CaPmtCommand::NotSelected as u8);
+    }
+
+    #[test]
+    fn parses_ca_pmt_reply() {
+        let body = [0x12, 0x34, 0xC7, 0x81, 0xE1, 0x01, 0xF1, 0xE1, 0x02, 0x00];
+        assert_eq!(
+            CaPmtReply::parse(&body).unwrap(),
+            CaPmtReply {
+                program_number: 0x1234,
+                version: 3,
+                ca_enable: Some(0x01),
+                streams: vec![(0x0101, Some(0x71)), (0x0102, None)],
+            }
+        );
+
+        assert!(CaPmtReply::parse(&body[.. 3]).is_err());
+        assert!(CaPmtReply::parse(&body[.. 6]).is_err());
     }
 
     #[test]

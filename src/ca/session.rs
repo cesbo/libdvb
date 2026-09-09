@@ -26,7 +26,12 @@ use textcode::dvb::DvbText;
 use super::{
     apdu,
     apdu::ApduTag,
-    capmt::Program,
+    capmt::{
+        CaPmtCommand,
+        CaPmtListManagement,
+        CaPmtReply,
+        Program,
+    },
     controller::{
         CaSlotFailure,
         CaSlotStatus,
@@ -113,6 +118,31 @@ pub enum CaEvent {
         session_id: u16,
         /// CA_system_id values in the order supplied by the module
         caids: Vec<u16>,
+    },
+    /// ca_pmt: a program change reached one Conditional Access application
+    CaPmt {
+        slot_id: u8,
+        session_id: u16,
+        program_number: u16,
+        list_management: CaPmtListManagement,
+        command: CaPmtCommand,
+    },
+    /// A program select reached no Conditional Access application of the
+    /// session: none of its CA descriptors carries a CAID from `caids`,
+    /// so nothing was sent and the module will not descramble it
+    CaPmtSkipped {
+        slot_id: u8,
+        session_id: u16,
+        program_number: u16,
+        /// confirmed CAID list of the session
+        caids: Vec<u16>,
+    },
+    /// ca_pmt_reply: the verdict of a Conditional Access application on a
+    /// CA_PMT (an empty reply, a bare acknowledgement, produces no event)
+    CaPmtReply {
+        slot_id: u8,
+        session_id: u16,
+        reply: CaPmtReply,
     },
     /// close_mmi: the module asks to close the dialogue; `delay` is the
     /// close delay in seconds when the module asked for a deferred close
@@ -407,15 +437,19 @@ impl CiSession {
     }
 
     pub(super) fn set_program(&mut self, program: Program) -> Result<Vec<u8>> {
-        self.resources
-            .conditional_access
-            .set_program(&mut self.transport, program)
+        self.resources.conditional_access.set_program(
+            &mut self.transport,
+            &mut self.events,
+            program,
+        )
     }
 
     pub(super) fn remove_program(&mut self, program_number: u16) -> Result<Vec<u8>> {
-        self.resources
-            .conditional_access
-            .remove_program(&mut self.transport, program_number)
+        self.resources.conditional_access.remove_program(
+            &mut self.transport,
+            &mut self.events,
+            program_number,
+        )
     }
 
     /// Desired programs retained across CA sessions, in program number order

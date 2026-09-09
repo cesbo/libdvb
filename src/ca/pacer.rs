@@ -72,6 +72,12 @@ impl CaPmtPacer {
         self.delay = delay;
     }
 
+    /// Changes the spacing between released changes; effective from the
+    /// next poll
+    pub fn set_interval(&mut self, interval: Duration) {
+        self.interval = interval;
+    }
+
     /// Whether the readiness gate is open: the CAM accepts CA_PMT
     pub fn ready(&self) -> bool {
         matches!(self.gate, Gate::Ready { .. })
@@ -355,6 +361,31 @@ mod tests {
         assert!(!pacer.ready());
         assert_eq!(pacer.poll(start + DELAY * 10), None);
         assert_eq!(pacer.queue.len(), 1);
+    }
+
+    #[test]
+    fn set_interval_takes_effect_next_poll() {
+        let mut pacer = pacer();
+        let start = Instant::now();
+        pacer.push_set(program(100, 1));
+        pacer.push_set(program(200, 2));
+        pacer.arm_ca_info(start);
+        let t1 = start + DELAY + Duration::from_secs(1);
+        assert_eq!(pacer.poll(t1), None);
+        assert!(pacer.ready());
+
+        let interval = INTERVAL * 3;
+        pacer.set_interval(interval);
+
+        // the old interval no longer releases, the new one does
+        assert_eq!(pacer.poll(t1 + INTERVAL + Duration::from_secs(1)), None);
+        let t2 = t1 + interval + Duration::from_secs(1);
+        assert_eq!(pacer.poll(t2), Some(set(100, 1)));
+        assert_eq!(pacer.poll(t2 + INTERVAL + Duration::from_secs(1)), None);
+        assert_eq!(
+            pacer.poll(t2 + interval + Duration::from_secs(1)),
+            Some(set(200, 2))
+        );
     }
 
     #[test]

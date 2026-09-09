@@ -67,6 +67,7 @@ enum Command {
     SetProgram(Program),
     RemoveProgram(u16),
     SetCaPmtDelay(Duration),
+    SetCaPmtInterval(Duration),
     EnterMenu {
         slot_id: u8,
     },
@@ -130,6 +131,12 @@ impl CiDriverHandle {
     /// the live controller; effective from the next driver tick
     pub fn set_ca_pmt_delay(&self, delay: Duration) {
         self.send(Command::SetCaPmtDelay(delay));
+    }
+
+    /// Changes the spacing between CA_PMT commands on the live controller;
+    /// effective from the next driver tick
+    pub fn set_ca_pmt_interval(&self, interval: Duration) {
+        self.send(Command::SetCaPmtInterval(interval));
     }
 
     /// Asks the CAM to enter its menu. Failures (for example the slot is
@@ -419,6 +426,7 @@ impl CiDriver {
             // program_number != 0 verified by the handle
             Command::RemoveProgram(pnr) => drop(self.controller.remove_program(pnr)),
             Command::SetCaPmtDelay(delay) => self.controller.set_ca_pmt_delay(delay),
+            Command::SetCaPmtInterval(interval) => self.controller.set_ca_pmt_interval(interval),
             Command::EnterMenu { slot_id } => {
                 self.slot_command("enter_menu", |c| c.enter_menu(slot_id))
             }
@@ -865,6 +873,18 @@ mod tests {
             "first release after {elapsed:?}"
         );
         cam.send_status(0, false);
+        wait_ca_event(&mut events, |event| {
+            matches!(
+                event,
+                CaEvent::CaPmt {
+                    program_number: 100,
+                    list_management: CaPmtListManagement::Only,
+                    command: CaPmtCommand::OkDescrambling,
+                    ..
+                }
+            )
+        })
+        .await;
 
         // a second change is released one interval later, not sooner
         let second = pmt_section(200, 2, caid);
@@ -914,6 +934,7 @@ mod tests {
             )
         );
         cam.send_status(0, false);
+        wait_ca_event(&mut events, |event| matches!(event, CaEvent::CaPmt { .. })).await;
 
         // exactly one release: later pacing passes have nothing queued
         cam_quiet(&mut cam, &mut events, Duration::from_millis(400)).await;

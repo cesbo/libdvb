@@ -8,6 +8,7 @@
 use std::collections::{
     BTreeMap,
     HashMap,
+    VecDeque,
 };
 
 use crate::{
@@ -16,6 +17,7 @@ use crate::{
         capmt::{
             CaPmtCommand,
             CaPmtListManagement,
+            CaPmtReply,
             Program,
         },
         resource::{
@@ -77,6 +79,7 @@ impl ConditionalAccessResource {
     pub fn set_program(
         &mut self,
         transport: &mut CiTransport,
+        events: &mut VecDeque<CaEvent>,
         program: Program,
     ) -> Result<Vec<u8>> {
         let program_number = program.program_number();
@@ -103,12 +106,12 @@ impl ConditionalAccessResource {
                 CaPmtListManagement::Add
             };
 
-            if let Some(body) =
+            let sent = if let Some(body) =
                 program.build_ca_pmt(caids, list_management, CaPmtCommand::OkDescrambling)?
             {
                 transport.send_apdu(session.slot_id, session_id, ApduTag::CA_PMT, &body)?;
                 session.selected.insert(program_number, program.clone());
-                touched_slots.push(session.slot_id);
+                Some((list_management, CaPmtCommand::OkDescrambling))
             } else if let Some(previous) = previous {
                 let body = previous
                     .build_ca_pmt(
@@ -124,7 +127,28 @@ impl ConditionalAccessResource {
                     })?;
                 transport.send_apdu(session.slot_id, session_id, ApduTag::CA_PMT, &body)?;
                 session.selected.remove(&program_number);
-                touched_slots.push(session.slot_id);
+                Some((CaPmtListManagement::Update, CaPmtCommand::NotSelected))
+            } else {
+                None
+            };
+
+            match sent {
+                Some((list_management, command)) => {
+                    touched_slots.push(session.slot_id);
+                    events.push_back(CaEvent::CaPmt {
+                        slot_id: session.slot_id,
+                        session_id,
+                        program_number,
+                        list_management,
+                        command,
+                    });
+                }
+                None => events.push_back(CaEvent::CaPmtSkipped {
+                    slot_id: session.slot_id,
+                    session_id,
+                    program_number,
+                    caids: caids.to_vec(),
+                }),
             }
         }
 
@@ -138,6 +162,7 @@ impl ConditionalAccessResource {
     pub fn remove_program(
         &mut self,
         transport: &mut CiTransport,
+        events: &mut VecDeque<CaEvent>,
         program_number: u16,
     ) -> Result<Vec<u8>> {
         if self.programs.remove(&program_number).is_none() {
@@ -174,6 +199,13 @@ impl ConditionalAccessResource {
             transport.send_apdu(session.slot_id, session_id, ApduTag::CA_PMT, &body)?;
             session.selected.remove(&program_number);
             touched_slots.push(session.slot_id);
+            events.push_back(CaEvent::CaPmt {
+                slot_id: session.slot_id,
+                session_id,
+                program_number,
+                list_management: CaPmtListManagement::Update,
+                command: CaPmtCommand::NotSelected,
+            });
         }
 
         touched_slots.sort_unstable();
@@ -238,7 +270,20 @@ impl Resource for ConditionalAccessResource {
 
                 Ok(())
             }
-            ApduTag::CA_PMT_REPLY | ApduTag::CA_UPDATE => Ok(()),
+            // an empty reply is a bare acknowledgement
+            ApduTag::CA_PMT_REPLY if body.is_empty() => Ok(()),
+            ApduTag::CA_PMT_REPLY => {
+                let reply = CaPmtReply::parse(body).map_err(|error| {
+                    Error::InvalidData(format!("ca slot {}: {error}", ctx.slot_id))
+                })?;
+                ctx.event(CaEvent::CaPmtReply {
+                    slot_id: ctx.slot_id,
+                    session_id: ctx.session_id,
+                    reply,
+                });
+                Ok(())
+            }
+            ApduTag::CA_UPDATE => Ok(()),
             tag => Err(Error::InvalidData(format!(
                 "ca slot {}: unexpected conditional access apdu tag {:?}",
                 ctx.slot_id, tag

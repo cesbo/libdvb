@@ -414,6 +414,13 @@ impl CiController {
         self.pacer.set_delay(delay);
     }
 
+    /// Changes the spacing between CA_PMT commands once the hold is over; effective from the
+    /// next `tick`. Slow CA applications silently drop commands that arrive while they still
+    /// process the previous one, so the spacing has to cover the module's per-program time.
+    pub fn set_ca_pmt_interval(&mut self, interval: Duration) {
+        self.pacer.set_interval(interval);
+    }
+
     /// Asks the CAM to enter its menu
     pub fn enter_menu(&mut self, slot_id: u8) -> Result<()> {
         self.require_active(slot_id)?;
@@ -1517,6 +1524,21 @@ pub(crate) mod test_support {
             .to_vec()
     }
 
+    pub fn ca_pmt_event(
+        session_id: u16,
+        program_number: u16,
+        list_management: CaPmtListManagement,
+        command: CaPmtCommand,
+    ) -> CaEvent {
+        CaEvent::CaPmt {
+            slot_id: 0,
+            session_id,
+            program_number,
+            list_management,
+            command,
+        }
+    }
+
     pub fn ca_pmt_frame(
         slot_id: u8,
         session_id: u16,
@@ -1545,6 +1567,7 @@ mod tests {
             capmt::{
                 CaPmtCommand,
                 CaPmtListManagement,
+                CaPmtReply,
             },
             spdu,
             tpdu,
@@ -2298,7 +2321,15 @@ mod tests {
         // A CA_PMT_REPLY acknowledges the link command and is accepted as
         // application feedback without producing a malformed event.
         cam.send_apdu(0, ca_session, ApduTag::CA_PMT_REPLY, &[]);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
         assert!(cam.recv().is_none());
 
         // A re-queued identical section is released on its own interval
@@ -2325,7 +2356,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                200,
+                CaPmtListManagement::Add,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         let updated_first = pmt_section(100, 3, caid);
         controller.set_program(&updated_first).unwrap();
@@ -2343,7 +2382,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Update,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         // If an update stops matching this CA session, withdraw the last
         // selected form. A later matching update selects it again.
@@ -2363,7 +2410,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Update,
+                CaPmtCommand::NotSelected,
+            )]
+        );
 
         controller.set_program(&updated_first).unwrap();
         now += pace_step();
@@ -2380,7 +2435,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Add,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         controller.remove_program(100).unwrap();
         now += pace_step();
@@ -2397,7 +2460,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Update,
+                CaPmtCommand::NotSelected,
+            )]
+        );
         controller.remove_program(999).unwrap();
         now += pace_step();
         controller.tick(now).unwrap();
@@ -2449,7 +2520,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                restored_session,
+                200,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         // A CA application re-announcing itself on the live session forgets
         // its selection as well: the same paced replay, no burst.
@@ -2472,6 +2551,97 @@ mod tests {
                 CaPmtCommand::OkDescrambling,
             )
         );
+    }
+
+    #[test]
+    fn test_ca_pmt_skipped_and_reply_events() {
+        let (mut controller, mut cam, state) = pair_with(1, pacing_config());
+        let mut now = Instant::now();
+        let caid = 0x0100_u16;
+        activate(&mut controller, &mut cam, &state, 0, now);
+        ack_initial_poll(&mut controller, &mut cam, now);
+        let ca_session = open_resource(
+            &mut controller,
+            &mut cam,
+            0,
+            ResourceId::CONDITIONAL_ACCESS_SUPPORT,
+            ApduTag::CA_INFO_ENQ,
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_INFO, &caid.to_be_bytes());
+        let _ = drain(&mut controller);
+        now += pace_step();
+        controller.tick(now).unwrap();
+
+        // a program without a descriptor for the session's CAIDs reaches
+        // no CA application: no frame, one skip event
+        controller
+            .set_program(&pmt_section(300, 1, 0x0500))
+            .unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert!(cam.recv().is_none());
+        assert_eq!(
+            drain(&mut controller),
+            vec![CaEvent::CaPmtSkipped {
+                slot_id: 0,
+                session_id: ca_session,
+                program_number: 300,
+                caids: vec![caid],
+            }]
+        );
+
+        let section = pmt_section(100, 1, caid);
+        controller.set_program(&section).unwrap();
+        now += pace_step();
+        controller.tick(now).unwrap();
+        assert_eq!(
+            cam.recv().unwrap(),
+            ca_pmt_frame(
+                0,
+                ca_session,
+                &section,
+                caid,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )
+        );
+        cam.send_status(0, false);
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
+
+        // the module's verdict is decoded; a malformed one is reported
+        // without breaking the session
+        cam.send_apdu(
+            0,
+            ca_session,
+            ApduTag::CA_PMT_REPLY,
+            &[0x00, 0x64, 0xC3, 0xF1, 0xE1, 0x00, 0x81],
+        );
+        assert_eq!(
+            drain(&mut controller),
+            vec![CaEvent::CaPmtReply {
+                slot_id: 0,
+                session_id: ca_session,
+                reply: CaPmtReply {
+                    program_number: 100,
+                    version: 1,
+                    ca_enable: Some(0x71),
+                    streams: vec![(0x0100, Some(0x01))],
+                },
+            }]
+        );
+        cam.send_apdu(0, ca_session, ApduTag::CA_PMT_REPLY, &[0x00]);
+        assert!(matches!(
+            drain(&mut controller).as_slice(),
+            [CaEvent::Malformed { slot_id: 0, .. }]
+        ));
     }
 
     #[test]
@@ -2596,7 +2766,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                100,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         // queue the second program and fail the interface before it is
         // released: the gate closes, the queued change survives
@@ -2642,7 +2820,15 @@ mod tests {
             )
         );
         cam.send_status(0, false);
-        assert!(drain(&mut controller).is_empty());
+        assert_eq!(
+            drain(&mut controller),
+            vec![ca_pmt_event(
+                ca_session,
+                200,
+                CaPmtListManagement::Only,
+                CaPmtCommand::OkDescrambling,
+            )]
+        );
 
         now += pace_step();
         controller.tick(now).unwrap();

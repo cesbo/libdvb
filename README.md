@@ -210,9 +210,12 @@ single CA application.
 
 `set_program()` and `remove_program()` queue changes; `tick()` holds them
 for `CiControllerConfig::ca_pmt_delay` (20 s by default) after the CAM
-handshake and then applies at most one per `ca_pmt_interval` (1 s) - many
-CAMs reject CA_PMT sent too early or too often. `ca_pmt_ready()` reports
-whether the gate is open.
+handshake and then applies at most one per `ca_pmt_interval` (1 s,
+adjustable with `set_ca_pmt_interval()`) - many CAMs reject CA_PMT sent
+too early or too often. `ca_pmt_ready()` reports whether the gate is
+open. CA_PMT activity is reported as `CaEvent::CaPmt` (dispatched),
+`CaEvent::CaPmtSkipped` (no matching CA descriptor) and
+`CaEvent::CaPmtReply` (module verdict).
 
 ```rust,no_run
 use std::time::Instant;

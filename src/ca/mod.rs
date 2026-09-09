@@ -68,6 +68,11 @@ pub use self::driver::{
 use self::sys::*;
 pub use self::{
     apdu::ApduTag,
+    capmt::{
+        CaPmtCommand,
+        CaPmtListManagement,
+        CaPmtReply,
+    },
     controller::{
         CaSlotFailure,
         CaSlotStatus,
