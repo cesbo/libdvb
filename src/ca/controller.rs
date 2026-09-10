@@ -121,9 +121,8 @@ pub struct CiControllerConfig {
     pub response_timeout: Duration,
     /// Delay before retrying after a successful global reset
     pub retry_interval: Duration,
-    /// Hold between the confirmed CA handshake and the first CA_PMT: the
-    /// module needs time to finish its own start-up after announcing itself
-    /// (see [`CiController::set_program`])
+    /// Hold between the confirmed CA handshake and the first CA_PMT (see
+    /// [`CiController::set_program`]); a long hold breaks some Irdeto CAMs
     pub ca_pmt_delay: Duration,
     /// Minimum interval between two CA_PMT commands once the hold is over
     pub ca_pmt_interval: Duration,
@@ -141,7 +140,7 @@ impl Default for CiControllerConfig {
             create_tc_timeout: Duration::from_secs(2),
             response_timeout: Duration::from_secs(10),
             retry_interval: Duration::from_secs(1),
-            ca_pmt_delay: Duration::from_secs(20),
+            ca_pmt_delay: Duration::from_secs(1),
             ca_pmt_interval: Duration::from_secs(1),
             ca_pmt_settle: Duration::from_secs(10),
         }
