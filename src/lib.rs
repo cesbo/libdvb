@@ -1,3 +1,4 @@
+pub mod bbframe;
 pub mod ca;
 pub mod dmx;
 pub mod dvr;
@@ -10,6 +11,7 @@ pub mod sysfs;
 
 mod fd;
 
+pub use bbframe::BbFrameDecoder;
 pub use ca::{
     CaDevice,
     CaEvent,

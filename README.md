@@ -198,6 +198,25 @@ let fd_in = ci.fd_in();   // write scrambled TS into the CAM
 let fd_out = ci.fd_out(); // read descrambled TS from the CAM
 ```
 
+## BBFrame (DigitalDevices)
+
+With the BBFrames bit in `DvbS2Tune::mis` DigitalDevices frontends deliver
+raw DVB-S2 base band frames fragmented into TS packets on PID 270.
+`BbFrameDecoder` reassembles them, extracts the user packets of one ISI and
+restores the `0x47` sync byte.
+
+```rust
+use libdvb::BbFrameDecoder;
+
+let mut bbframe = BbFrameDecoder::new(1); // ISI
+for ts in dvr_buffer.chunks_exact(188) {
+    let out = bbframe.push(ts); // 0..n TS packets, empty until a frame completes
+    if let Some(isi) = bbframe.take_foreign_isi() {
+        println!("unknown stream id {isi}");
+    }
+}
+```
+
 ## CI
 
 `CiController` handles CAM insertion/removal, reset, `CREATE_TC`, transport
