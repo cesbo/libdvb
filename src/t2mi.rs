@@ -2,10 +2,10 @@
 //! stream of one PLP
 //!
 //! T2-MI packets (type, count, superframe index, payload length in bits, payload, CRC-32) travel
-//! in TS packets section-like: a payload_unit_start packet begins with a pointer to where the
-//! T2-MI packet in progress ends. Baseband Frame packets (type `0x00`: frame index, PLP id, flags,
-//! BBFRAME) of the selected PLP go through the [`crate::bbframe`] extractor; timestamps, L1
-//! signalling and the other packet types are skipped.
+//! in TS packets. With payload_unit_start set, the first payload byte is a pointer: the number
+//! of bytes after it before the first new T2-MI packet. Complete packets are decoded immediately.
+//! Baseband Frame packets (type `0x00`: frame index, PLP id, flags, BBFRAME) of the selected PLP go
+//! through the [`crate::bbframe`] extractor; timestamps, L1 signalling and other types are skipped.
 
 use libmpegts::{
     ts::{
@@ -17,7 +17,7 @@ use libmpegts::{
 
 use crate::bbframe::Extractor;
 
-/// Longest run of T2-MI packet bytes between two pointer fields
+/// T2-MI reassembly buffer limit
 const SECTION_MAX: usize = 0x2000;
 const HEADER_LEN: usize = 6;
 const CRC_LEN: usize = 4;
@@ -94,11 +94,14 @@ impl T2miDecoder {
             if self.section_len > 0 && self.append(tail) {
                 self.decode_section();
             }
-            self.section_len = 0;
+            if self.section_len > 0 {
+                self.drop_section();
+            }
             self.append(head);
         } else if self.section_len > 0 {
             self.append(payload);
         }
+        self.decode_section();
 
         self.extract.out()
     }
@@ -137,7 +140,7 @@ impl T2miDecoder {
         true
     }
 
-    /// Decodes a section; malformed data drops the remaining section and the carried UP
+    /// Decodes complete packets and retains an incomplete tail; malformed data drops reassembly
     fn decode_section(&mut self) {
         let mut rest = &self.section[.. self.section_len];
         while let Some((header, body)) = rest.split_at_checked(HEADER_LEN) {
@@ -152,7 +155,8 @@ impl T2miDecoder {
             if crc32b(&rest[.. total - CRC_LEN])
                 != u32::from_be_bytes([crc[0], crc[1], crc[2], crc[3]])
             {
-                break;
+                self.drop_section();
+                return;
             }
 
             let count = header[1];
@@ -166,7 +170,8 @@ impl T2miDecoder {
 
             if header[0] == TYPE_BASEBAND_FRAME {
                 let Some((prefix, frame)) = payload.split_at_checked(BBFRAME_PREFIX) else {
-                    break;
+                    self.drop_section();
+                    return;
                 };
                 let plp = prefix[1];
                 if plp == self.plp {
@@ -178,8 +183,10 @@ impl T2miDecoder {
 
             rest = &rest[total ..];
         }
-        if !rest.is_empty() {
-            self.extract.drop_carry();
+        let consumed = self.section_len - rest.len();
+        if consumed > 0 {
+            self.section.copy_within(consumed .. self.section_len, 0);
+            self.section_len -= consumed;
         }
     }
 }
@@ -274,15 +281,15 @@ mod tests {
     }
 
     fn flush_full(pending: &mut Vec<u8>, out: &mut Vec<[u8; PACKET_SIZE]>, cc: &mut u8) {
-        while pending.len() > 183 {
-            out.push(ts_packet(false, *cc, &pending[.. 184]));
+        while pending.len() >= 183 {
+            let n = pending.len().min(184);
+            out.push(ts_packet(false, *cc, &pending[.. n]));
             *cc = (*cc + 1) & 0x0F;
-            pending.drain(.. 184);
+            pending.drain(.. n);
         }
     }
 
-    /// Section-like TS encapsulation: every unit starts with a payload_unit_start packet whose
-    /// pointer skips the tail of the previous one; a final flush packet closes the last unit
+    /// Encapsulates units in TS; pointer counts bytes before the first new unit after the pointer
     fn pack(units: &[Vec<u8>], cc: &mut u8) -> Vec<[u8; PACKET_SIZE]> {
         let mut out = Vec::new();
         let mut pending: Vec<u8> = Vec::new();
@@ -297,10 +304,10 @@ mod tests {
             pending = unit[take ..].to_vec();
         }
         flush_full(&mut pending, &mut out, cc);
-        let mut payload = vec![pending.len() as u8];
-        payload.extend_from_slice(&pending);
-        out.push(ts_packet(true, *cc, &payload));
-        *cc = (*cc + 1) & 0x0F;
+        if !pending.is_empty() {
+            out.push(ts_packet(false, *cc, &pending));
+            *cc = (*cc + 1) & 0x0F;
+        }
         out
     }
 
@@ -320,6 +327,87 @@ mod tests {
         let pkts = pack(&[bb_packet(0, PLP, &bbframe(false, Some(0), &df))], &mut cc);
         assert!(pkts.len() > 3);
         assert_eq!(feed(&mut dec, &pkts), concat(&[up(1), up(2), up(3)]));
+    }
+
+    #[test]
+    fn emit_complete() {
+        let split = body(1);
+        let first = bb_packet(0, PLP, &bbframe(false, Some(0), &split[.. 100]));
+        let last = bb_packet(1, PLP, &bbframe(false, Some(87), &split[100 ..]));
+        for n in [
+            1,
+            HEADER_LEN - 1,
+            HEADER_LEN,
+            last.len() - CRC_LEN,
+            last.len() - 1,
+            last.len(),
+        ] {
+            let mut dec = T2miDecoder::new(PLP);
+            let start = [vec![0], first.clone()].concat();
+            assert!(dec.push(&ts_packet(true, 0, &start)).is_empty());
+            let head = [vec![0], last[.. n].to_vec()].concat();
+            let out = dec.push(&ts_packet(true, 1, &head));
+            if n == last.len() {
+                assert_eq!(out, up(1));
+            } else {
+                assert!(out.is_empty());
+                assert_eq!(dec.push(&ts_packet(false, 2, &last[n ..])), up(1));
+            }
+        }
+    }
+
+    #[test]
+    fn multiple_packets() {
+        let mut dec = T2miDecoder::new(PLP);
+        let split = body(1);
+        let first = bb_packet(0, PLP, &bbframe(false, Some(0), &split[.. 60]));
+        let middle = bb_packet(1, PLP, &bbframe(false, None, &split[60 .. 120]));
+        let last = bb_packet(2, PLP, &bbframe(false, Some(67), &split[120 ..]));
+        let payload = [vec![0], first, middle, last[.. 3].to_vec()].concat();
+        assert!(dec.push(&ts_packet(true, 0, &payload)).is_empty());
+        assert_eq!(dec.push(&ts_packet(false, 1, &last[3 ..])), up(1));
+    }
+
+    #[test]
+    fn complete_with_next() {
+        let mut dec = T2miDecoder::new(PLP);
+        let mut cc = 0;
+        let data: Vec<u8> = (1 ..= 46).flat_map(body).collect();
+        let first = bb_packet(0, PLP, &bbframe(false, Some(0), &data[.. 186]));
+        assert!(feed(&mut dec, &pack(&[first], &mut cc)).is_empty());
+
+        let end = 186 + SECTION_MAX - HEADER_LEN - BBFRAME_PREFIX - 10 - CRC_LEN;
+        let large = bb_packet(1, PLP, &bbframe(false, Some(1), &data[186 .. end]));
+        let head = [vec![0], large[.. 183].to_vec()].concat();
+        assert!(dec.push(&ts_packet(true, cc, &head)).is_empty());
+        cc = (cc + 1) & 0x0F;
+        for chunk in large[183 .. large.len() - 1].chunks(184) {
+            assert!(dec.push(&ts_packet(false, cc, chunk)).is_empty());
+            cc = (cc + 1) & 0x0F;
+        }
+
+        let next = bb_packet(2, PLP, &bbframe(false, Some(60), &data[end .. end + 159]));
+        let payload = [vec![1, large[large.len() - 1]], next].concat();
+        let expected: Vec<u8> = (1 ..= 45).flat_map(up).collect();
+        assert_eq!(dec.push(&ts_packet(true, cc, &payload)), expected);
+    }
+
+    #[test]
+    fn truncated_at_start() {
+        let broken = bb_packet(1, PLP, &bbframe(false, Some(0), &body(9)));
+        for n in [
+            HEADER_LEN - 1,
+            HEADER_LEN + BBFRAME_PREFIX,
+            broken.len() - 1,
+        ] {
+            let mut dec = T2miDecoder::new(PLP);
+            let mut cc = 0;
+            let first = bb_packet(0, PLP, &bbframe(false, Some(0), &body(1)[.. 100]));
+            assert!(feed(&mut dec, &pack(&[first, broken[.. n].to_vec()], &mut cc)).is_empty());
+            let df = [body(2)[100 ..].to_vec(), body(3)].concat();
+            let next = bb_packet(1, PLP, &bbframe(false, Some(87), &df));
+            assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3));
+        }
     }
 
     #[test]
@@ -527,7 +615,9 @@ mod tests {
             let start = bb_packet(0, PLP, &bbframe(false, Some(0), &body(1)[.. 100]));
             assert!(feed(&mut dec, &pack(&[start], &mut cc)).is_empty());
 
-            assert!(dec.push(&ts_packet(true, cc, &[0; 184])).is_empty());
+            let mut pending = [0; 184];
+            pending[5 .. 7].fill(0xFF);
+            assert!(dec.push(&ts_packet(true, cc, &pending)).is_empty());
             cc = (cc + 1) & 0x0F;
             match cause {
                 "pointer" => {
@@ -568,8 +658,11 @@ mod tests {
                 middle[5] |= 0x80;
             }
             let tail = &unit[183 + len ..];
-            let end = [vec![tail.len() as u8], tail.to_vec()].concat();
-            let pkts = [ts_packet(true, 0, &start), middle, ts_packet(true, 3, &end)];
+            let pkts = [
+                ts_packet(true, 0, &start),
+                middle,
+                ts_packet(false, 3, tail),
+            ];
             let expected = if discontinuity {
                 concat(&[up(1), up(2)])
             } else {
@@ -635,6 +728,7 @@ mod tests {
             &mut cc,
         );
         let last = pkts.len() - 1;
+        pkts[last][1] |= 0x40;
         let pointer = PACKET_SIZE - TsPacketRef::from(&pkts[last]).payload().unwrap().len();
         pkts[last][pointer] = 0xFF;
         assert!(feed(&mut dec, &pkts).is_empty());

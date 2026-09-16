@@ -33,9 +33,8 @@ const HEADER_LEN: usize = 10;
 const PREFIX_LEN: usize = 9;
 const FRAGMENT_LEN_MAX: u8 = 0xB4;
 const FRAGMENT_FIRST: u8 = 0xB8;
-/// Every UP of the longest input decoded in one call (a 13-bit DFL, or a T2-MI section of
-/// 8192 bytes in high efficiency mode) plus the completed carried UP
-const OUT_MAX: usize = 44 * PACKET_SIZE;
+/// UPs from an 8192-byte T2-MI packet, the rest of its completing TS payload and the carried UP
+const OUT_MAX: usize = 45 * PACKET_SIZE;
 
 /// CRC-8 x^8+x^7+x^6+x^4+x^2+1, MSB first, init 0
 const CRC8_TABLE: [u8; 256] = {
