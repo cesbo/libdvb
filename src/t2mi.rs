@@ -198,7 +198,7 @@ mod tests {
     const PLP: u8 = 1;
     const PID: u16 = 0x1000;
 
-    /// TS packet whose sync byte the modulator removed: the 187 bytes behind it
+    /// Complete 188-byte TS packet, including the sync byte
     fn up(tag: u8) -> [u8; PACKET_SIZE] {
         let mut p = [0u8; PACKET_SIZE];
         p[0] = 0x47;
