@@ -167,7 +167,7 @@ impl BbFrameDecoder {
     fn drop_frame(&mut self) {
         self.fragment = None;
         self.frame_len = 0;
-        self.extract.carry_len = 0;
+        self.extract.drop_carry();
     }
 }
 
@@ -206,6 +206,11 @@ impl Extractor {
 
     pub(crate) fn clear(&mut self) {
         self.out_len = 0;
+    }
+
+    /// Drops the carried UP, preserving packets already extracted
+    pub(crate) fn drop_carry(&mut self) {
+        self.carry_len = 0;
     }
 
     pub(crate) fn reset(&mut self) {

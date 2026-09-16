@@ -73,10 +73,11 @@ impl T2miDecoder {
 
         if pkt.is_payload_start() {
             let Some((&pointer, rest)) = payload.split_first() else {
+                self.drop_section();
                 return &[];
             };
             let Some((tail, head)) = rest.split_at_checked(usize::from(pointer)) else {
-                self.section_len = 0;
+                self.drop_section();
                 self.cc = cc;
                 return &[];
             };
@@ -92,7 +93,7 @@ impl T2miDecoder {
                     .adaptation_field()
                     .is_some_and(|af| !af.is_empty() && !af.discontinuity_indicator())
             {
-                self.section_len = 0;
+                self.drop_section();
             } else {
                 self.append(payload);
             }
@@ -118,11 +119,16 @@ impl T2miDecoder {
         Some(plp)
     }
 
+    fn drop_section(&mut self) {
+        self.section_len = 0;
+        self.extract.drop_carry();
+    }
+
     /// Appends to the section; an overflow drops it and returns false
     fn append(&mut self, data: &[u8]) -> bool {
         let end = self.section_len + data.len();
         if end > SECTION_MAX {
-            self.section_len = 0;
+            self.drop_section();
             return false;
         }
         self.section[self.section_len .. end].copy_from_slice(data);
@@ -130,7 +136,7 @@ impl T2miDecoder {
         true
     }
 
-    /// Walks the T2-MI packets of the completed section; a CRC failure abandons the rest of it
+    /// Decodes a section; malformed data drops the remaining section and the carried UP
     fn decode_section(&mut self) {
         let mut rest = &self.section[.. self.section_len];
         while let Some((header, body)) = rest.split_at_checked(HEADER_LEN) {
@@ -148,9 +154,10 @@ impl T2miDecoder {
                 break;
             }
 
-            if header[0] == TYPE_BASEBAND_FRAME
-                && let Some((prefix, frame)) = payload.split_at_checked(BBFRAME_PREFIX)
-            {
+            if header[0] == TYPE_BASEBAND_FRAME {
+                let Some((prefix, frame)) = payload.split_at_checked(BBFRAME_PREFIX) else {
+                    break;
+                };
                 let plp = prefix[1];
                 if plp == self.plp {
                     self.extract.decode(frame);
@@ -160,6 +167,9 @@ impl T2miDecoder {
             }
 
             rest = &rest[total ..];
+        }
+        if !rest.is_empty() {
+            self.extract.drop_carry();
         }
     }
 }
@@ -241,7 +251,15 @@ mod tests {
             p[1] |= 0x40;
         }
         p[3] = 0x10 | (cc & 0x0F);
-        p[4 .. 4 + payload.len()].copy_from_slice(payload);
+        let stuffing = PACKET_SIZE - 4 - payload.len();
+        if stuffing > 0 {
+            p[3] |= 0x20;
+            p[4] = stuffing as u8 - 1;
+            if stuffing > 1 {
+                p[5] = 0;
+            }
+        }
+        p[4 + stuffing ..].copy_from_slice(payload);
         p
     }
 
@@ -395,6 +413,70 @@ mod tests {
     }
 
     #[test]
+    fn malformed_drops_carry() {
+        let df1 = [body(1), body(2)[.. 100].to_vec()].concat();
+        let df2 = [body(2)[100 ..].to_vec(), body(3), body(4)[.. 100].to_vec()].concat();
+        let df3 = [body(4)[100 ..].to_vec(), body(5)].concat();
+        let middle = bb_packet(1, PLP, &bbframe(false, Some(87), &df2));
+        let mut bad_crc = middle.clone();
+        let last = bad_crc.len() - 1;
+        bad_crc[last] ^= 0xFF;
+
+        for broken in [
+            bad_crc,
+            middle[.. HEADER_LEN - 1].to_vec(),
+            middle[.. HEADER_LEN + BBFRAME_PREFIX].to_vec(),
+            middle[.. middle.len() - 1].to_vec(),
+            t2mi_packet(TYPE_BASEBAND_FRAME, 1, &[0, PLP]),
+        ] {
+            let mut dec = T2miDecoder::new(PLP);
+            let mut cc = 0;
+            // Preserve packets emitted before the error in the same section.
+            let mut section = bb_packet(0, PLP, &bbframe(false, Some(0), &df1));
+            section.extend_from_slice(&broken);
+            let units = [section, bb_packet(2, PLP, &bbframe(false, Some(87), &df3))];
+            assert_eq!(
+                feed(&mut dec, &pack(&units, &mut cc)),
+                concat(&[up(1), up(5)])
+            );
+        }
+    }
+
+    #[test]
+    fn discard_drops_carry() {
+        for cause in ["pointer", "overflow", "cc"] {
+            let mut dec = T2miDecoder::new(PLP);
+            let mut cc = 0;
+            let start = bb_packet(0, PLP, &bbframe(false, Some(0), &body(1)[.. 100]));
+            assert!(feed(&mut dec, &pack(&[start], &mut cc)).is_empty());
+
+            assert!(dec.push(&ts_packet(true, cc, &[0; 184])).is_empty());
+            cc = (cc + 1) & 0x0F;
+            match cause {
+                "pointer" => {
+                    assert!(dec.push(&ts_packet(true, cc, &[0xFF])).is_empty());
+                    cc = (cc + 1) & 0x0F;
+                }
+                "overflow" => {
+                    for _ in 0 .. SECTION_MAX / 184 {
+                        assert!(dec.push(&ts_packet(false, cc, &[0; 184])).is_empty());
+                        cc = (cc + 1) & 0x0F;
+                    }
+                }
+                _ => {
+                    cc = (cc + 5) & 0x0F;
+                    assert!(dec.push(&ts_packet(false, cc, &[0; 100])).is_empty());
+                    cc = (cc + 1) & 0x0F;
+                }
+            }
+
+            let df = [body(2)[100 ..].to_vec(), body(3)].concat();
+            let next = bb_packet(2, PLP, &bbframe(false, Some(87), &df));
+            assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3), "{cause}");
+        }
+    }
+
+    #[test]
     fn cc_gap() {
         let mut dec = T2miDecoder::new(PLP);
         let mut cc = 0;
@@ -428,7 +510,8 @@ mod tests {
             &mut cc,
         );
         let last = pkts.len() - 1;
-        pkts[last][4] = 0xFF;
+        let pointer = PACKET_SIZE - TsPacketRef::from(&pkts[last]).payload().unwrap().len();
+        pkts[last][pointer] = 0xFF;
         assert!(feed(&mut dec, &pkts).is_empty());
     }
 
