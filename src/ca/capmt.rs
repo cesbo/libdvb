@@ -1,5 +1,7 @@
 //! EN 50221 CA_PMT coding from an MPEG-TS PMT section.
 
+use std::fmt;
+
 use libmpegts::psi::{
     Desc09Ref,
     DescriptorsRef,
@@ -23,6 +25,18 @@ pub enum CaPmtListManagement {
     Update = 0x05,
 }
 
+impl fmt::Display for CaPmtListManagement {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let v = match self {
+            CaPmtListManagement::Only => "only",
+            CaPmtListManagement::Add => "add",
+            CaPmtListManagement::Update => "update",
+        };
+
+        write!(f, "{}", v)
+    }
+}
+
 /// en50221 8.4.3.4: ca_pmt_cmd_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -31,6 +45,17 @@ pub enum CaPmtCommand {
     OkDescrambling = 0x01,
     /// stop descrambling the program
     NotSelected = 0x04,
+}
+
+impl fmt::Display for CaPmtCommand {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let v = match self {
+            CaPmtCommand::OkDescrambling => "ok_descrambling",
+            CaPmtCommand::NotSelected => "not_selected",
+        };
+
+        write!(f, "{}", v)
+    }
 }
 
 /// en50221 8.4.3.5: ca_pmt_reply, the verdict of a CA application on a
