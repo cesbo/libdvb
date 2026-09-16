@@ -70,6 +70,14 @@ impl T2miDecoder {
             return &[];
         };
         let cc = pkt.cc();
+        if (self.cc + 1) & 0x0F != cc
+            && !pkt
+                .adaptation_field()
+                .is_some_and(|af| !af.is_empty() && af.discontinuity_indicator())
+        {
+            self.drop_section();
+        }
+        self.cc = cc;
 
         if pkt.is_payload_start() {
             let Some((&pointer, rest)) = payload.split_first() else {
@@ -78,7 +86,6 @@ impl T2miDecoder {
             };
             let Some((tail, head)) = rest.split_at_checked(usize::from(pointer)) else {
                 self.drop_section();
-                self.cc = cc;
                 return &[];
             };
             if self.section_len > 0 && self.append(tail) {
@@ -87,18 +94,8 @@ impl T2miDecoder {
             self.section_len = 0;
             self.append(head);
         } else if self.section_len > 0 {
-            let gap = (self.cc + 1) & 0x0F != cc;
-            if gap
-                && pkt
-                    .adaptation_field()
-                    .is_some_and(|af| !af.is_empty() && !af.discontinuity_indicator())
-            {
-                self.drop_section();
-            } else {
-                self.append(payload);
-            }
+            self.append(payload);
         }
-        self.cc = cc;
 
         self.extract.out()
     }
@@ -478,27 +475,75 @@ mod tests {
 
     #[test]
     fn cc_gap() {
-        let mut dec = T2miDecoder::new(PLP);
-        let mut cc = 0;
         let unit = bb_packet(
             0,
             PLP,
             &bbframe(false, Some(0), &[body(1), body(2)].concat()),
         );
-        let mut pkts = pack(&[unit.clone()], &mut cc);
-        // a continuation packet with a cc gap and an adaptation field without discontinuity
-        // drops the section
-        let mut p = pkts[1];
-        p[3] = 0x30 | ((p[3] + 1) & 0x0F);
-        p[4] = 0x01;
-        p[5] = 0x00;
-        pkts[1] = p;
-        assert!(feed(&mut dec, &pkts).is_empty());
+        for (len, discontinuity) in [(184, false), (183, false), (182, false), (182, true)] {
+            let mut dec = T2miDecoder::new(PLP);
+            let start = [vec![0], unit[.. 183].to_vec()].concat();
+            let mut middle = ts_packet(false, 2, &unit[183 .. 183 + len]);
+            if discontinuity {
+                middle[5] |= 0x80;
+            }
+            let tail = &unit[183 + len ..];
+            let end = [vec![tail.len() as u8], tail.to_vec()].concat();
+            let pkts = [ts_packet(true, 0, &start), middle, ts_packet(true, 3, &end)];
+            let expected = if discontinuity {
+                concat(&[up(1), up(2)])
+            } else {
+                Vec::new()
+            };
+            assert_eq!(feed(&mut dec, &pkts), expected, "{len}, {discontinuity}");
 
-        // the same gap without an adaptation field keeps the data
-        let mut pkts = pack(&[unit], &mut cc);
-        pkts[1][3] = 0x10 | ((pkts[1][3] + 1) & 0x0F);
-        assert_eq!(feed(&mut dec, &pkts), concat(&[up(1), up(2)]));
+            let mut cc = 4;
+            let next = bb_packet(1, PLP, &bbframe(false, Some(0), &body(3)));
+            assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3));
+        }
+    }
+
+    #[test]
+    fn cc_gap_start() {
+        let mut dec = T2miDecoder::new(PLP);
+        let mut cc = 0;
+        let units = [
+            bb_packet(
+                0,
+                PLP,
+                &bbframe(false, Some(0), &[body(1), body(2)].concat()),
+            ),
+            bb_packet(1, PLP, &bbframe(false, Some(0), &body(3))),
+        ];
+        let mut pkts = pack(&units, &mut cc);
+        let start = (1 .. pkts.len())
+            .find(|&i| TsPacketRef::from(&pkts[i]).is_payload_start())
+            .unwrap();
+        assert!(TsPacketRef::from(&pkts[start]).payload().unwrap()[0] > 0);
+        for p in &mut pkts[start ..] {
+            p[3] = (p[3] & 0xF0) | ((p[3] + 5) & 0x0F);
+        }
+        assert_eq!(feed(&mut dec, &pkts), up(3));
+    }
+
+    #[test]
+    fn cc_gap_drops_carry() {
+        for pusi in [false, true] {
+            let mut dec = T2miDecoder::new(PLP);
+            let mut cc = 0;
+            let start = bb_packet(0, PLP, &bbframe(false, Some(0), &body(1)[.. 100]));
+            assert!(feed(&mut dec, &pack(&[start], &mut cc)).is_empty());
+            assert_eq!(dec.section_len, 0);
+
+            cc = (cc + 5) & 0x0F;
+            if !pusi {
+                assert!(dec.push(&ts_packet(false, cc, &[0; 184])).is_empty());
+                cc = (cc + 1) & 0x0F;
+            }
+            let df = [body(2)[100 ..].to_vec(), body(3)].concat();
+            let next = bb_packet(2, PLP, &bbframe(false, Some(87), &df));
+            assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3), "{pusi}");
+        }
     }
 
     #[test]
