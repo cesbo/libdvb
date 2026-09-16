@@ -102,9 +102,9 @@ impl BbFrameDecoder {
         let cc = pkt.cc();
         if self.frame_len > 0
             && (self.cc + 1) & 0x0F != cc
-            && pkt
+            && !pkt
                 .adaptation_field()
-                .is_some_and(|af| !af.is_empty() && !af.discontinuity_indicator())
+                .is_some_and(|af| !af.is_empty() && af.discontinuity_indicator())
         {
             self.drop_frame();
         }
@@ -562,18 +562,37 @@ mod tests {
     }
 
     #[test]
+    fn cc_gap_without_af() {
+        for gap_at in [1, 2] {
+            let mut dec = BbFrameDecoder::new(ISI);
+            let mut cc = 0;
+            let mut pkts = fragments(&frame(ISI, 188, 0, &up(1)), &mut cc);
+            pkts.extend(fragments(&frame(ISI, 188, 0, &up(2)), &mut cc));
+            pkts.push(fragments(&frame(ISI, 188, 0, &up(3)), &mut cc)[0]);
+
+            // Keep fragment counters intact; only CC reveals the gap within or between frames.
+            for p in &mut pkts[gap_at ..] {
+                p[3] = 0x10 | ((p[3] + 6) & 0x0F);
+            }
+            assert_eq!(feed(&mut dec, &pkts), restored(2));
+        }
+    }
+
+    #[test]
     fn cc_gap_resets() {
-        let mut dec = BbFrameDecoder::new(ISI);
-        let mut cc = 0;
-        let (mut pkts, _) = aligned_stream(&mut cc);
-        let mut gap = [0xFFu8; PACKET_SIZE];
-        gap[0] = 0x47;
-        gap[1 .. 3].copy_from_slice(&BBFRAME_PID.to_be_bytes());
-        gap[3] = 0x30 | ((pkts[0][3] + 5) & 0x0F);
-        gap[4] = 1;
-        gap[5] = 0x00;
-        pkts.insert(1, gap);
-        assert!(feed(&mut dec, &pkts).is_empty());
+        for af_len in [0, 1] {
+            let mut dec = BbFrameDecoder::new(ISI);
+            let mut cc = 0;
+            let (mut pkts, _) = aligned_stream(&mut cc);
+            let mut gap = [0xFFu8; PACKET_SIZE];
+            gap[0] = 0x47;
+            gap[1 .. 3].copy_from_slice(&BBFRAME_PID.to_be_bytes());
+            gap[3] = 0x30 | ((pkts[0][3] + 5) & 0x0F);
+            gap[4] = af_len;
+            gap[5] = 0x00;
+            pkts.insert(1, gap);
+            assert!(feed(&mut dec, &pkts).is_empty());
+        }
     }
 
     /// A cc gap with an adaptation field drops accumulated bytes only, not an empty first fragment
