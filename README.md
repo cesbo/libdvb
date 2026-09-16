@@ -19,44 +19,11 @@ CA PMT is built from raw MPEG-TS PMT sections. The `tokio` feature adds
 ## FeDevice
 
 `TuneRequest` describes a tune per delivery system and is lowered to a
-DVBv5 property sequence.
-
-DVB-S2 example:
-
-```rust
-use libdvb::{
-    DvbS2Tune,
-    FeDevice,
-    Lnb,
-    SecConfig,
-    TuneRequest,
-    fe::sys::SecVoltage,
-};
-
-let fe = FeDevice::open_rw(0, 0)?;
-
-// SEC setup comes first: LNB conversion, voltage, tone, DiSEqC.
-// Returns the frontend frequency; the tune request carries no SEC state.
-let frequency_khz = fe.setup_sec(
-    11044,
-    Lnb::Universal {
-        lof_low_mhz: 9750,
-        lof_high_mhz: 10600,
-        switch_mhz: 11700,
-    },
-    SecConfig::Lnb {
-        voltage: SecVoltage::V13,
-    },
-)?;
-
-let request = TuneRequest::DvbS2(DvbS2Tune {
-    frequency_khz,
-    symbolrate: 27500 * 1000,
-    ..Default::default()
-});
-
-fe.tune(&request)?;
-```
+DVBv5 property sequence. SEC setup comes first: `FeDevice::setup_sec()`
+takes the transponder frequency, the `Lnb` and the `SecConfig` (voltage,
+tone, DiSEqC, Unicable), runs the sequence and returns the frontend
+frequency the request must carry; the tune request itself carries no SEC
+state.
 
 `Lnb::auto` picks the LNB from the transponder frequency: L band passes
 through, C and S bands use a single oscillator, Ku band gets the universal
@@ -65,23 +32,9 @@ LNB.
 `DTV_STREAM_ID` is set by `DvbS2Tune::mis` (multistream ISI plus PLS) and
 `DvbT2Tune::stream_id` (PLP). A root PLS code is converted to the Gold
 sequence index; `DTV_SCRAMBLING_SEQUENCE_INDEX` is skipped for root code 0
-and on DVB API older than 5.11.
-
-The stream id is passed through unchanged, so driver-specific values work
-too, such as the BBFrames bit of some DVB-S2 frontends:
-
-```rust
-let request = TuneRequest::DvbS2(DvbS2Tune {
-    frequency_khz,
-    symbolrate: 27500 * 1000,
-    mis: Some(Mis {
-        mode: PlsMode::Root,
-        code: 0,
-        stream_id: 0x8000_0000,
-    }),
-    ..Default::default()
-});
-```
+and on DVB API older than 5.11. The stream id is passed through unchanged,
+so driver-specific values work too, such as the BBFrames bit
+(`stream_id: 0x8000_0000`) of some DVB-S2 frontends.
 
 Low-level access: `TuneRequest::properties()` returns the `Vec<DtvProperty>`
 for `FeDevice::set_properties()`; `sec_sequence()` returns the
@@ -91,131 +44,55 @@ through `DtvPropertyRaw` and `FeDevice::set_properties_raw()`.
 `FeDevice::drain_events()` discards queued tune events and keeps the SEC
 state; `FeDevice::clear()` switches SEC off.
 
-Frontend information:
-
-```rust
-let fe = FeDevice::open_ro(0, 0)?;
-println!("DVB API: {}", fe.api_version());
-println!("Frontend: {}", fe.name());
-
-print!("Delivery system:");
-for v in fe.delivery_systems() {
-    print!(" {}", v);
-}
-println!();
-
-println!("Frequency range: {:?}", fe.frequency_range());
-println!("Symbolrate range: {:?}", fe.symbolrate_range());
-println!("Frontend capabilities: {:?}", fe.caps());
-```
-
-Frontend status:
-
-```rust
-let fe = FeDevice::open_ro(0, 0)?;
-let mut status = FeStatus::default();
-status.read(&fe)?;
-println!("{}", status.to_status_string());
-```
-
-`FeStatus` also exposes parsed values: `delivery_system()`, `modulation()`,
-`signal_strength()`, `signal_strength_decibel()`, `snr()`, `snr_decibel()`,
-`ber()`, `unc()`.
+Frontend information: `api_version()`, `name()`, `delivery_systems()`,
+`frequency_range()`, `symbolrate_range()`, `caps()`, `vendor_id()`,
+`device_id()`. Frontend status: `get_stats()` returns the DVBv5 `FeStats`
+(`status()`, `has_lock()`, `delivery_system()`, `modulation()`, `signal()`
+and `cnr()` as `FeLevel` with `decibel()` / `relative()`, `ber()`, `unc()`,
+`to_status_string()`); `read_status()`, `read_signal_strength()`,
+`read_snr()`, `read_ber()`, `read_unc()` are the DVBv3 ioctls.
 
 ## Demux
 
-`DmxDevice` opens `/dev/dvb/adapterN/demuxM`: PES filters, buffer size,
-start/stop.
-
-```rust
-use libdvb::dmx::{
-    DmxDevice,
-    sys::{
-        DMX_IN_FRONTEND,
-        DMX_OUT_TS_TAP,
-        DMX_PES_OTHER,
-        DmxFilterFlags,
-        DmxPesFilterParams,
-    },
-};
-
-let dmx = DmxDevice::open(0, 0)?;
-let filter = DmxPesFilterParams {
-    pid: 8192,
-    input: DMX_IN_FRONTEND,
-    output: DMX_OUT_TS_TAP,
-    pes_type: DMX_PES_OTHER,
-    flags: DmxFilterFlags::IMMEDIATE_START.bits(),
-};
-
-dmx.set_pes_filter(&filter)?;
-```
+`DmxDevice` opens `/dev/dvb/adapterN/demuxM`: `set_pes_filter()` with the
+`DmxPesFilterParams` of `dmx::sys`, `set_ts_tap()` / `open_ts_tap()` for a
+TS tap on one PID (8192 for the whole stream), buffer size, start/stop.
 
 ## DVR
 
 `DvrDevice` opens `/dev/dvb/adapterN/dvrM` read-only and blocking. It
 implements `Read`; `set_buffer_size()` wraps `DMX_SET_BUFFER_SIZE`.
 
-```rust
-use std::io::Read;
-
-use libdvb::DvrDevice;
-
-let mut dvr = DvrDevice::open(0, 0)?;
-dvr.set_buffer_size(100 * 188 * 1024)?;
-
-let mut buf = vec![0; 188 * 1024];
-let size = dvr.read(&mut buf)?;
-println!("Read {} bytes", size);
-```
-
 ## NetDevice
 
-`NetInterface` is removed on drop; `mac()` returns the interface MAC address.
-
-```rust
-use libdvb::NetDevice;
-
-let dev = NetDevice::open(0, 0)?;
-let interface = dev.add_if(0, libdvb::net::sys::DVB_NET_FEEDTYPE_MPE)?;
-println!("Interface: {}", interface);
-println!("MAC: {}", interface.mac());
-```
+`NetDevice::add_if()` creates a dvbnet interface for a PID and feed type and
+returns a `NetInterface`, removed on drop; `mac()` returns the interface MAC
+address.
 
 ## External CI (DigitalDevices / TBS)
 
 `CiTsDevice` opens the CI adapter TS pipe (`ciN` on DigitalDevices, `secN`
-on TBS) in non-blocking mode. It only exposes the descriptors; the TS moves
-through them directly. The control path is `CaDevice` and the en50221 stack.
-
-```rust
-use libdvb::CiTsDevice;
-
-let ci = CiTsDevice::open(1, 0)?;
-ci.set_input_bitrate(70)?; // MBit/s; TBS only, no-op for other vendors
-
-let fd_in = ci.fd_in();   // write scrambled TS into the CAM
-let fd_out = ci.fd_out(); // read descrambled TS from the CAM
-```
+on TBS) in non-blocking mode. It only exposes the descriptors: `fd_in()`
+takes the scrambled TS into the CAM, `fd_out()` returns the descrambled TS;
+`set_input_bitrate()` sets the TBS CI bitrate (a no-op for other vendors).
+The control path is `CaDevice` and the en50221 stack.
 
 ## BBFrame (DigitalDevices)
 
 With the BBFrames bit in `DvbS2Tune::mis` DigitalDevices frontends deliver
 raw DVB-S2 base band frames fragmented into TS packets on PID 270.
-`BbFrameDecoder` reassembles them, extracts the user packets of one ISI and
-restores the `0x47` sync byte.
+`BbFrameDecoder::push()` reassembles them, extracts the user packets of one
+ISI and restores the `0x47` sync byte; `push_frame()` decodes a complete
+BBFRAME from any transport; `take_foreign_isi()` reports each other input
+stream once.
 
-```rust
-use libdvb::BbFrameDecoder;
+## T2-MI
 
-let mut bbframe = BbFrameDecoder::new(1); // ISI
-for ts in dvr_buffer.chunks_exact(188) {
-    let out = bbframe.push(ts); // 0..n TS packets, empty until a frame completes
-    if let Some(isi) = bbframe.take_foreign_isi() {
-        println!("unknown stream id {isi}");
-    }
-}
-```
+`T2miDecoder` turns the T2-MI packets (TS 102 773) of one PID back into the
+transport stream of one PLP: feed `push()` the TS packets of the T2-MI PID.
+The BBFRAMEs inside go through the same extractor as `BbFrameDecoder`, in
+normal and high efficiency mode; `take_foreign_plp()` reports each other
+PLP once.
 
 ## CI
 
@@ -227,79 +104,31 @@ event loop: poll its file descriptor from the application runtime, drain
 replies; `caids()` returns the deduplicated slot list, `session_caids()` a
 single CA application.
 
-`set_program()` and `remove_program()` queue changes; `tick()` holds them
-for `CiControllerConfig::ca_pmt_delay` (1 s by default) after the CAM
-handshake and then applies at most one per `ca_pmt_interval` (1 s,
-adjustable with `set_ca_pmt_interval()`); a long hold breaks some Irdeto
-CAMs. `ca_pmt_ready()` reports whether the gate is open. CA_PMT activity
-is reported as `CaEvent::CaPmt` (dispatched), `CaEvent::CaPmtSkipped` (no
-matching CA descriptor) and `CaEvent::CaPmtReply` (module verdict).
-
-```rust,no_run
-use std::time::Instant;
-
-use libdvb::{CaEvent, CiController};
-
-let mut ci = CiController::open(0, 0)?;
-
-// Call periodically (for example, every 100 ms).
-ci.tick(Instant::now())?;
-
-// Drain after each tick and when the CA descriptor is readable.
-while let Some(event) = ci.poll_event()? {
-    match event {
-        CaEvent::SlotStatusChanged { slot_id, new, .. } => {
-            println!("CI slot {slot_id}: {new:?}");
-        }
-        CaEvent::CaInfo { slot_id, session_id, caids } => {
-            println!("CI slot {slot_id}, CA session {session_id}: {caids:X?}");
-        }
-        event => println!("CI: {event:?}"),
-    }
-}
-
-// A complete raw PMT section, including CRC32. The data is copied, so the
-// buffer may be reused. The change is applied from tick().
-let raw_pmt: &[u8] = get_raw_pmt_section();
-let program_number = ci.set_program(raw_pmt)?;
-
-// Later, withdraw the service by its program_number.
-ci.remove_program(program_number)?;
-
-# Ok::<(), libdvb::error::Error>(())
-```
-
-Examples: `examples/cainfo.rs` prints the inserted CAMs and exits;
-`examples/camenu.rs` is an interactive CAM menu.
+`set_program()` takes one complete raw PMT section including CRC32 (copied)
+and returns the program number `remove_program()` takes back. `tick()`
+holds the changes for `CiControllerConfig::ca_pmt_delay` (1 s by default)
+after the CAM handshake and then applies at most one per `ca_pmt_interval`
+(1 s, adjustable with `set_ca_pmt_interval()`); a long hold breaks some
+Irdeto CAMs. `ca_pmt_ready()` reports whether the gate is open. CA_PMT
+activity is reported as `CaEvent::CaPmt` (dispatched),
+`CaEvent::CaPmtSkipped` (no matching CA descriptor) and
+`CaEvent::CaPmtReply` (module verdict).
 
 ### Async driver (feature `tokio`)
 
 `CiDriver` owns the event loop: it waits for CA link frames, schedules
 `tick()`, idles while the link is suspended and retries a failed `CA_RESET`.
 Spawn `run()` on your runtime - the library spawns nothing itself. The
-cloneable handle sends commands from any thread; CA_PMT pacing is the same
-as in the manual mode. Dropping all handles or calling `shutdown()` stops
-the loop and closes the device.
+cloneable `CiDriverHandle` sends commands from any thread and exposes
+`ready_watch()`; events arrive as `CiDriverEvent` on the returned channel.
+CA_PMT pacing is the same as in the manual mode. Dropping all handles or
+calling `shutdown()` stops the loop and closes the device.
 
-```rust,no_run
-use libdvb::{CiController, CiDriver, CiDriverEvent};
+## Examples
 
-let controller = CiController::open(0, 0)?;
-let (driver, handle, mut events) = CiDriver::new(controller);
-let ready = handle.ready_watch();   // watch::Receiver<bool>
-
-runtime.spawn(driver.run());
-
-// Program changes from any thread; validation is synchronous.
-let program_number = handle.set_program(get_raw_pmt_section())?;
-
-while let Some(event) = events.recv().await {
-    match event {
-        CiDriverEvent::Ca(event) => println!("CI: {event:?}"),
-        event => println!("CI driver: {event:?}"),
-    }
-}
-```
+Compiled examples in `examples/`: `feinfo` and `femon` (frontend
+information and status), `netinfo` (dvbnet), `cainfo` (prints the inserted
+CAMs and exits), `camenu` (interactive CAM menu).
 
 ## File Descriptors
 

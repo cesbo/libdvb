@@ -1,15 +1,22 @@
-//! DVB-S2 BBFrame-in-TS decoder (DigitalDevices)
+//! DVB-S2/T2 BBFrame decoder: base band frames to transport stream
 //!
-//! With the BBFrames bit set in `DTV_STREAM_ID`, DigitalDevices DVB-S2 frontends deliver the
-//! raw base band frames (EN 302 307-1 5.1.6) instead of the demultiplexed transport stream. Each
-//! BBFRAME is fragmented into TS packets on [`BBFRAME_PID`]: a 5-byte prefix (`00 80 00`, fragment
-//! length, fragment counter) followed by the fragment. The counter is `0xB8` for the first
-//! fragment of a frame and then 1, 2, 3 ... The decoder reassembles the frames of one input stream
-//! (ISI), splits the data field into user packets along UPL / SYNCD, restores the `0x47` sync byte
-//! the modulator replaced by a CRC-8 (5.1.3) and returns the transport stream. A frame is decoded
-//! when the first fragment of the next frame arrives, so extraction lags one BBFRAME behind.
-//! Only the fragment reassembly is DigitalDevices-specific: a frame that arrives whole through
-//! another transport goes through [`BbFrameDecoder::push_frame`].
+//! A base band frame (EN 302 307-1 5.1.6, EN 302 755 5.1.7) carries the user packets of one input
+//! stream behind a 10-byte BBHEADER (MATYPE, UPL, DFL, SYNC, SYNCD, CRC-8). In normal mode every
+//! UP is a 188-byte TS packet whose sync byte the modulator replaced by a CRC-8; in high
+//! efficiency mode (signalled by the mode bit xored into the CRC-8 field) the sync byte is
+//! removed and the UP is 187 bytes, optionally followed by a null packet deletion counter. The
+//! decoder restores the `0x47` sync byte, carries a UP split across frames and returns whole TS
+//! packets.
+//!
+//! [`BbFrameDecoder`] also reassembles the frames DigitalDevices DVB-S2 frontends deliver with the
+//! BBFrames bit set in `DTV_STREAM_ID`: each BBFRAME is fragmented into TS packets on
+//! [`BBFRAME_PID`] behind a 5-byte prefix (`00 80 00`, fragment length, fragment counter; the
+//! counter is `0xB8` for the first fragment of a frame and then 1, 2, 3 ...). A frame is decoded
+//! when the first fragment of the next frame arrives, so extraction lags one BBFRAME behind. A
+//! frame that arrives whole through another transport goes through
+//! [`BbFrameDecoder::push_frame`]; [`crate::T2miDecoder`] shares the extractor.
+
+use std::cmp::Ordering;
 
 use libmpegts::ts::{
     PACKET_SIZE,
@@ -26,7 +33,8 @@ const HEADER_LEN: usize = 10;
 const PREFIX_LEN: usize = 9;
 const FRAGMENT_LEN_MAX: u8 = 0xB4;
 const FRAGMENT_FIRST: u8 = 0xB8;
-/// Every UP of the longest data field (13-bit DFL) plus the completed carried UP
+/// Every UP of the longest input decoded in one call (a 13-bit DFL, or a T2-MI section of
+/// 8192 bytes in high efficiency mode) plus the completed carried UP
 const OUT_MAX: usize = 44 * PACKET_SIZE;
 
 /// CRC-8 x^8+x^7+x^6+x^4+x^2+1, MSB first, init 0
@@ -50,7 +58,7 @@ const CRC8_TABLE: [u8; 256] = {
     table
 };
 
-fn crc8(data: &[u8]) -> u8 {
+pub(crate) fn crc8(data: &[u8]) -> u8 {
     data.iter()
         .fold(0, |crc, &b| CRC8_TABLE[usize::from(crc ^ b)])
 }
@@ -65,19 +73,6 @@ pub struct BbFrameDecoder {
     extract: Extractor,
 }
 
-/// Data field to user packets of one ISI; the UP tail is carried between frames
-struct Extractor {
-    isi: u8,
-    /// Carried UP tail: length in the stream, first 188 bytes stored
-    carry: [u8; PACKET_SIZE],
-    carry_len: usize,
-    out: Box<[u8; OUT_MAX]>,
-    out_len: usize,
-    foreign_isi: Option<u8>,
-    /// ISIs already reported by `take_foreign_isi`, one bit each
-    seen_isi: [u32; 8],
-}
-
 impl BbFrameDecoder {
     /// Creates a decoder for the input stream `isi`
     pub fn new(isi: u8) -> Self {
@@ -86,15 +81,7 @@ impl BbFrameDecoder {
             fragment: None,
             frame: Box::new([0; FRAME_MAX]),
             frame_len: 0,
-            extract: Extractor {
-                isi,
-                carry: [0; PACKET_SIZE],
-                carry_len: 0,
-                out: Box::new([0; OUT_MAX]),
-                out_len: 0,
-                foreign_isi: None,
-                seen_isi: [0; 8],
-            },
+            extract: Extractor::new(Some(isi)),
         }
     }
 
@@ -102,7 +89,7 @@ impl BbFrameDecoder {
     ///
     /// Packets shorter than 188 bytes, without sync byte or on another PID are ignored.
     pub fn push(&mut self, ts: &[u8]) -> &[u8] {
-        self.extract.out_len = 0;
+        self.extract.clear();
 
         let Ok(ts) = <&[u8; PACKET_SIZE]>::try_from(&ts[.. ts.len().min(PACKET_SIZE)]) else {
             return &[];
@@ -154,31 +141,27 @@ impl BbFrameDecoder {
         self.frame[self.frame_len .. end].copy_from_slice(fragment);
         self.frame_len = end;
 
-        &self.extract.out[.. self.extract.out_len]
+        self.extract.out()
     }
 
     /// Decodes one complete BBFRAME (BBHEADER and data field) and returns its TS packets, valid
     /// until the next call
     pub fn push_frame(&mut self, frame: &[u8]) -> &[u8] {
+        self.extract.clear();
         self.extract.decode(frame);
-        &self.extract.out[.. self.extract.out_len]
+        self.extract.out()
     }
 
     /// Clears all reassembly state and the foreign ISI memory
     pub fn reset(&mut self) {
         self.cc = 0;
         self.drop_frame();
-        self.extract.carry_len = 0;
-        self.extract.out_len = 0;
-        self.extract.foreign_isi = None;
-        self.extract.seen_isi = [0; 8];
+        self.extract.reset();
     }
 
     /// Returns an ISI seen in the stream other than the configured one, each once
     pub fn take_foreign_isi(&mut self) -> Option<u8> {
-        let isi = self.extract.foreign_isi.take()?;
-        self.extract.seen_isi[usize::from(isi >> 5)] |= 1 << (isi & 0x1F);
-        Some(isi)
+        self.extract.take_foreign_isi()
     }
 
     fn drop_frame(&mut self) {
@@ -187,65 +170,147 @@ impl BbFrameDecoder {
     }
 }
 
+/// Data field to user packets; the UP tail is carried between frames
+pub(crate) struct Extractor {
+    /// Frames of other input streams are skipped; `None` takes every frame
+    isi: Option<u8>,
+    /// Carried UP in packet form (byte 0 is the sync position): first 188 bytes stored,
+    /// `carry_len` counts the UP bytes received so far as transmitted
+    carry: [u8; PACKET_SIZE],
+    carry_len: usize,
+    out: Box<[u8; OUT_MAX]>,
+    out_len: usize,
+    foreign_isi: Option<u8>,
+    /// ISIs already reported by `take_foreign_isi`, one bit each
+    seen_isi: [u32; 8],
+}
+
 impl Extractor {
-    fn decode(&mut self, frame: &[u8]) {
+    pub(crate) fn new(isi: Option<u8>) -> Self {
+        Self {
+            isi,
+            carry: [0; PACKET_SIZE],
+            carry_len: 0,
+            out: Box::new([0; OUT_MAX]),
+            out_len: 0,
+            foreign_isi: None,
+            seen_isi: [0; 8],
+        }
+    }
+
+    /// TS packets extracted since `clear`
+    pub(crate) fn out(&self) -> &[u8] {
+        &self.out[.. self.out_len]
+    }
+
+    pub(crate) fn clear(&mut self) {
         self.out_len = 0;
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.carry_len = 0;
+        self.out_len = 0;
+        self.foreign_isi = None;
+        self.seen_isi = [0; 8];
+    }
+
+    pub(crate) fn take_foreign_isi(&mut self) -> Option<u8> {
+        let isi = self.foreign_isi.take()?;
+        self.seen_isi[usize::from(isi >> 5)] |= 1 << (isi & 0x1F);
+        Some(isi)
+    }
+
+    /// Decodes one BBFRAME and appends its TS packets to the output; a malformed frame drops the
+    /// carried UP as well
+    pub(crate) fn decode(&mut self, frame: &[u8]) {
         let Some((h, df)) = frame.split_at_checked(HEADER_LEN) else {
             self.carry_len = 0;
             return;
         };
-        if crc8(h) != 0 {
+        // TS streams only; the CRC-8 field xor the header CRC is the mode
+        let mode = crc8(&h[.. 9]) ^ h[9];
+        if h[0] >> 6 != 0b11 || mode > 1 {
             self.carry_len = 0;
             return;
         }
-
-        let isi = h[1];
-        if isi != self.isi {
+        if self.isi.is_some_and(|isi| isi != h[1]) {
+            let isi = h[1];
             if self.seen_isi[usize::from(isi >> 5)] & (1 << (isi & 0x1F)) == 0 {
                 self.foreign_isi = Some(isi);
             }
             return;
         }
 
-        let upl = usize::from(u16::from_be_bytes([h[2], h[3]]) >> 3);
+        // UP as transmitted and the part of it inside the packet: the whole packet behind a
+        // CRC-8 in normal mode, 187 bytes without the sync byte plus the null packet deletion
+        // counter in high efficiency mode
+        let (up_len, body) = if mode == 0 {
+            (
+                usize::from(u16::from_be_bytes([h[2], h[3]]) >> 3),
+                PACKET_SIZE,
+            )
+        } else {
+            (
+                PACKET_SIZE - 1 + usize::from(h[0] >> 2 & 1),
+                PACKET_SIZE - 1,
+            )
+        };
         let dfl = usize::from(u16::from_be_bytes([h[4], h[5]]) >> 3);
-        let syncd = usize::from(u16::from_be_bytes([h[7], h[8]]) >> 3);
-        if upl < PACKET_SIZE || dfl > df.len() || syncd > dfl {
+        // SYNCD 0xFFFF: no UP starts in this data field
+        let syncd = match u16::from_be_bytes([h[7], h[8]]) {
+            0xFFFF => None,
+            bits => Some(usize::from(bits >> 3)),
+        };
+        if up_len < body || dfl > df.len() || syncd.is_some_and(|s| s > dfl) {
             self.carry_len = 0;
             return;
         }
         let df = &df[.. dfl];
-        let out = &mut *self.out;
-        let mut out_len = 0;
 
-        // The carried tail completes only when SYNCD lands exactly at its end
-        if syncd + self.carry_len == upl {
-            if self.carry_len < PACKET_SIZE {
-                let head = &df[.. PACKET_SIZE - self.carry_len];
-                self.carry[self.carry_len ..].copy_from_slice(head);
+        // the bytes before the first UP start continue the carried UP, which completes only
+        // when they land exactly at its end
+        let head = syncd.unwrap_or(dfl);
+        match (self.carry_len + head).cmp(&up_len) {
+            Ordering::Equal => {
+                self.append_carry(body, &df[.. head]);
+                emit(&mut *self.out, &mut self.out_len, &self.carry);
             }
-            emit(out, &mut out_len, &self.carry);
+            Ordering::Less if syncd.is_none() && self.carry_len > 0 => {
+                self.append_carry(body, df);
+                return;
+            }
+            _ => {}
         }
 
-        let mut i = syncd;
-        while dfl - i >= upl {
-            emit(out, &mut out_len, &df[i .. i + PACKET_SIZE]);
-            i += upl;
+        let mut i = head;
+        while dfl - i >= up_len {
+            emit(&mut *self.out, &mut self.out_len, &df[i .. i + body]);
+            i += up_len;
         }
-        self.out_len = out_len;
 
-        self.carry_len = dfl - i;
-        let stored = self.carry_len.min(PACKET_SIZE);
-        self.carry[.. stored].copy_from_slice(&df[i .. i + stored]);
+        self.carry_len = 0;
+        self.append_carry(body, &df[i ..]);
+    }
+
+    /// Appends UP bytes to the carried UP; in high efficiency mode the stored copy starts after
+    /// the sync position
+    fn append_carry(&mut self, body: usize, data: &[u8]) {
+        let pos = PACKET_SIZE - body + self.carry_len;
+        if pos < PACKET_SIZE {
+            let n = data.len().min(PACKET_SIZE - pos);
+            self.carry[pos .. pos + n].copy_from_slice(&data[.. n]);
+        }
+        self.carry_len += data.len();
     }
 }
 
-/// Appends one UP with the sync byte restored
+/// Appends one UP as a TS packet with the sync byte restored: 188 bytes with the CRC-8 in the
+/// sync position, or the 187 bytes behind it
 fn emit(out: &mut [u8], out_len: &mut usize, up: &[u8]) {
     let Some(dst) = out.get_mut(*out_len .. *out_len + PACKET_SIZE) else {
         return;
     };
-    dst.copy_from_slice(up);
+    dst[PACKET_SIZE - up.len() ..].copy_from_slice(up);
     dst[0] = 0x47;
     *out_len += PACKET_SIZE;
 }
@@ -600,6 +665,100 @@ mod tests {
         dec.reset();
         feed(&mut dec, &pkts);
         assert_eq!(dec.take_foreign_isi(), Some(5));
+    }
+
+    /// High efficiency mode header: the mode bit is xored into the CRC-8 field
+    fn header_hem(npd: bool, dfl: u16, syncd: u16) -> [u8; HEADER_LEN] {
+        let mut h = [0u8; HEADER_LEN];
+        h[0] = 0xC0 | if npd { 0x04 } else { 0 };
+        h[1] = ISI;
+        h[4 .. 6].copy_from_slice(&(dfl << 3).to_be_bytes());
+        h[7 .. 9].copy_from_slice(&syncd.to_be_bytes());
+        h[9] = crc8(&h[.. 9]) ^ 0x01;
+        h
+    }
+
+    fn frame_hem(npd: bool, syncd: Option<u16>, df: &[u8]) -> Vec<u8> {
+        let mut f = header_hem(npd, df.len() as u16, syncd.map_or(0xFFFF, |s| s << 3)).to_vec();
+        f.extend_from_slice(df);
+        f
+    }
+
+    #[test]
+    fn hem() {
+        let mut dec = BbFrameDecoder::new(ISI);
+        // UPs without the sync byte, a UP split over two frames, then null packet deletion
+        let mut df1 = up(1)[1 ..].to_vec();
+        df1.extend_from_slice(&up(2)[1 .. 60]);
+        let mut df2 = up(2)[60 ..].to_vec();
+        df2.extend_from_slice(&up(3)[1 ..]);
+        assert_eq!(
+            dec.push_frame(&frame_hem(false, Some(0), &df1)),
+            restored(1)
+        );
+        assert_eq!(
+            dec.push_frame(&frame_hem(false, Some(128), &df2)),
+            concat(&[restored(2), restored(3)])
+        );
+
+        let mut df3 = up(4)[1 ..].to_vec();
+        df3.push(0x05);
+        df3.extend_from_slice(&up(5)[1 ..]);
+        df3.push(0x00);
+        assert_eq!(
+            dec.push_frame(&frame_hem(true, Some(0), &df3)),
+            concat(&[restored(4), restored(5)])
+        );
+    }
+
+    #[test]
+    fn syncd_none() {
+        let mut dec = BbFrameDecoder::new(ISI);
+        let split = up(1);
+        // a UP spread over three frames: start, a data field without any UP start, end
+        assert!(
+            dec.push_frame(&frame(ISI, 188, 0, &split[.. 50]))
+                .is_empty()
+        );
+        assert!(
+            dec.push_frame(&frame_hem_normal(&split[50 .. 100]))
+                .is_empty()
+        );
+        let mut df3 = split[100 ..].to_vec();
+        df3.extend_from_slice(&up(2));
+        assert_eq!(
+            dec.push_frame(&frame(ISI, 188, 88, &df3)),
+            concat(&[restored(1), restored(2)])
+        );
+
+        // nothing carried: a data field without UP start is unusable
+        assert!(dec.push_frame(&frame_hem_normal(&[0x55; 30])).is_empty());
+        assert_eq!(dec.push_frame(&frame(ISI, 188, 0, &up(3))), restored(3));
+    }
+
+    /// Normal mode frame with SYNCD 0xFFFF
+    fn frame_hem_normal(df: &[u8]) -> Vec<u8> {
+        let mut h = header(ISI, 188, df.len() as u16, 0);
+        h[7 .. 9].copy_from_slice(&[0xFF, 0xFF]);
+        h[9] = crc8(&h[.. 9]);
+        let mut f = h.to_vec();
+        f.extend_from_slice(df);
+        f
+    }
+
+    #[test]
+    fn matype() {
+        let mut dec = BbFrameDecoder::new(ISI);
+        let mut h = header(ISI, 188, 188, 0);
+        h[0] = 0x80; // GSE
+        h[9] = crc8(&h[.. 9]);
+        let mut f = h.to_vec();
+        f.extend_from_slice(&up(1));
+        assert!(dec.push_frame(&f).is_empty());
+        // mode field above 1: bad CRC
+        let mut f = frame(ISI, 188, 0, &up(1));
+        f[9] ^= 0x02;
+        assert!(dec.push_frame(&f).is_empty());
     }
 
     #[test]

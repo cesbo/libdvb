@@ -8,6 +8,7 @@ pub mod modulator;
 pub mod net;
 pub mod scan;
 pub mod sysfs;
+pub mod t2mi;
 
 mod fd;
 
@@ -63,3 +64,4 @@ pub use scan::{
     FeProbe,
     scan,
 };
+pub use t2mi::T2miDecoder;
