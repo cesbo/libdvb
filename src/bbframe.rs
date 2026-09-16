@@ -167,6 +167,7 @@ impl BbFrameDecoder {
     fn drop_frame(&mut self) {
         self.fragment = None;
         self.frame_len = 0;
+        self.extract.carry_len = 0;
     }
 }
 
@@ -525,6 +526,28 @@ mod tests {
         let (mut pkts, _) = aligned_stream(&mut cc);
         pkts.remove(1);
         assert!(feed(&mut dec, &pkts).is_empty());
+    }
+
+    #[test]
+    fn sequence_gap_carry() {
+        let mut dec = BbFrameDecoder::new(ISI);
+        let mut cc = 0;
+        let mut pkts = fragments(&frame(ISI, 188, 0, &up(1)[.. 100]), &mut cc);
+
+        let mut df2 = up(1)[100 ..].to_vec();
+        df2.extend_from_slice(&up(2));
+        df2.extend_from_slice(&up(3)[.. 100]);
+        let mut lost = fragments(&frame(ISI, 188, 88, &df2), &mut cc);
+        lost.remove(1);
+        pkts.extend(lost);
+
+        // SYNCD fits the stale carry, but the tail belongs to a different UP.
+        let mut df3 = up(3)[100 ..].to_vec();
+        df3.extend_from_slice(&up(4));
+        pkts.extend(fragments(&frame(ISI, 188, 88, &df3), &mut cc));
+        pkts.push(fragments(&frame(ISI, 188, 0, &up(5)), &mut cc)[0]);
+
+        assert_eq!(feed(&mut dec, &pkts), restored(4));
     }
 
     #[test]
