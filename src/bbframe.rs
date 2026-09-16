@@ -63,7 +63,7 @@ pub(crate) fn crc8(data: &[u8]) -> u8 {
         .fold(0, |crc, &b| CRC8_TABLE[usize::from(crc ^ b)])
 }
 
-/// Reassembles BBFrames from the fragment PID and extracts the TS of one ISI
+/// Reassembles BBFrames from the fragment PID and extracts one TS
 pub struct BbFrameDecoder {
     cc: u8,
     /// Last fragment counter; `None` until the next `0xB8` fragment
@@ -74,7 +74,7 @@ pub struct BbFrameDecoder {
 }
 
 impl BbFrameDecoder {
-    /// Creates a decoder for the input stream `isi`
+    /// Creates a decoder selecting `isi` in MIS or the sole stream in SIS
     pub fn new(isi: u8) -> Self {
         Self {
             cc: 0,
@@ -173,7 +173,7 @@ impl BbFrameDecoder {
 
 /// Data field to user packets; the UP tail is carried between frames
 pub(crate) struct Extractor {
-    /// Frames of other input streams are skipped; `None` takes every frame
+    /// Frames of other MIS input streams are skipped; `None` takes every frame
     isi: Option<u8>,
     /// Carried UP in packet form (byte 0 is the sync position): first 188 bytes stored,
     /// `carry_len` counts the UP bytes received so far as transmitted
@@ -234,7 +234,7 @@ impl Extractor {
             self.carry_len = 0;
             return;
         }
-        if self.isi.is_some_and(|isi| isi != h[1]) {
+        if h[0] & 0x20 == 0 && self.isi.is_some_and(|isi| isi != h[1]) {
             let isi = h[1];
             if self.seen_isi[usize::from(isi >> 5)] & (1 << (isi & 0x1F)) == 0 {
                 self.foreign_isi = Some(isi);
@@ -485,6 +485,25 @@ mod tests {
         pkts.extend(fragments(&frame(ISI, 188, 0, &up(4)), &mut cc));
         pkts.extend(fragments(&frame(ISI, 188, 0, &up(5)), &mut cc));
         assert_eq!(feed(&mut dec, &pkts), concat(&[restored(1), restored(4)]));
+    }
+
+    #[test]
+    fn single_stream() {
+        for mode in [0, 1] {
+            let mut dec = BbFrameDecoder::new(ISI);
+            for reserved in [0, ISI, 5, 255] {
+                let mut f = if mode == 0 {
+                    frame(ISI, 188, 0, &up(1))
+                } else {
+                    frame_hem(false, Some(0), &up(1)[1 ..])
+                };
+                f[0] |= 0x20;
+                f[1] = reserved;
+                f[9] = crc8(&f[.. 9]) ^ mode;
+                assert_eq!(dec.push_frame(&f), restored(1));
+                assert_eq!(dec.take_foreign_isi(), None);
+            }
+        }
     }
 
     #[test]
