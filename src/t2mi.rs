@@ -29,6 +29,8 @@ const BBFRAME_PREFIX: usize = 3;
 pub struct T2miDecoder {
     plp: u8,
     cc: u8,
+    /// Last CRC-validated T2-MI packet count, across all types and PLPs
+    packet_count: Option<u8>,
     section: Box<[u8; SECTION_MAX]>,
     section_len: usize,
     extract: Extractor,
@@ -43,6 +45,7 @@ impl T2miDecoder {
         Self {
             plp,
             cc: 0,
+            packet_count: None,
             section: Box::new([0; SECTION_MAX]),
             section_len: 0,
             extract: Extractor::new(None),
@@ -103,6 +106,7 @@ impl T2miDecoder {
     /// Clears all reassembly state and the foreign PLP memory
     pub fn reset(&mut self) {
         self.cc = 0;
+        self.packet_count = None;
         self.section_len = 0;
         self.extract.reset();
         self.foreign_plp = None;
@@ -150,6 +154,15 @@ impl T2miDecoder {
             {
                 break;
             }
+
+            let count = header[1];
+            if self
+                .packet_count
+                .is_some_and(|previous| previous.wrapping_add(1) != count)
+            {
+                self.extract.drop_carry();
+            }
+            self.packet_count = Some(count);
 
             if header[0] == TYPE_BASEBAND_FRAME {
                 let Some((prefix, frame)) = payload.split_at_checked(BBFRAME_PREFIX) else {
@@ -327,6 +340,73 @@ mod tests {
     }
 
     #[test]
+    fn packet_count() {
+        let mut dec = T2miDecoder::new(PLP);
+        let mut cc = 0;
+        let split = body(2);
+        let df1 = [body(1), split[.. 100].to_vec()].concat();
+        let df2 = [split[100 ..].to_vec(), body(3)].concat();
+        let units = [
+            bb_packet(254, PLP, &bbframe(false, Some(0), &df1)),
+            t2mi_packet(0x20, 255, &[0; 12]),
+            bb_packet(0, 2, &bbframe(false, Some(0), &body(9))),
+            bb_packet(1, PLP, &bbframe(false, Some(87), &df2)),
+        ];
+        assert_eq!(
+            feed(&mut dec, &pack(&units, &mut cc)),
+            concat(&[up(1), up(2), up(3)])
+        );
+    }
+
+    #[test]
+    fn packet_count_gap() {
+        let df1 = [body(1), body(2)[.. 100].to_vec()].concat();
+        let df2 = [body(3)[100 ..].to_vec(), body(4), body(5)[.. 60].to_vec()].concat();
+        let df3 = [body(5)[60 ..].to_vec(), body(6)].concat();
+        for (previous, count) in [(0, 2u8), (255, 1), (42, 42), (42, 5)] {
+            for combined in [false, true] {
+                let mut dec = T2miDecoder::new(PLP);
+                let mut cc = 0;
+                let mut units = vec![
+                    bb_packet(previous, PLP, &bbframe(false, Some(0), &df1)),
+                    bb_packet(count, PLP, &bbframe(false, Some(87), &df2)),
+                    bb_packet(count.wrapping_add(1), PLP, &bbframe(false, Some(127), &df3)),
+                ];
+                if combined {
+                    units = vec![units.concat()];
+                }
+                assert_eq!(
+                    feed(&mut dec, &pack(&units, &mut cc)),
+                    concat(&[up(1), up(4), up(5), up(6)]),
+                    "{previous}, {count}, {combined}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn packet_count_gap_skipped() {
+        let df1 = [body(1), body(2)[.. 100].to_vec()].concat();
+        let df2 = [body(3)[100 ..].to_vec(), body(4)].concat();
+        for skipped in [
+            t2mi_packet(0x20, 2, &[0; 12]),
+            bb_packet(2, 2, &bbframe(false, Some(0), &body(9))),
+        ] {
+            let mut dec = T2miDecoder::new(PLP);
+            let mut cc = 0;
+            let units = [
+                bb_packet(0, PLP, &bbframe(false, Some(0), &df1)),
+                skipped,
+                bb_packet(3, PLP, &bbframe(false, Some(87), &df2)),
+            ];
+            assert_eq!(
+                feed(&mut dec, &pack(&units, &mut cc)),
+                concat(&[up(1), up(4)])
+            );
+        }
+    }
+
+    #[test]
     fn span() {
         let mut dec = T2miDecoder::new(PLP);
         let mut cc = 0;
@@ -468,7 +548,7 @@ mod tests {
             }
 
             let df = [body(2)[100 ..].to_vec(), body(3)].concat();
-            let next = bb_packet(2, PLP, &bbframe(false, Some(87), &df));
+            let next = bb_packet(1, PLP, &bbframe(false, Some(87), &df));
             assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3), "{cause}");
         }
     }
@@ -541,7 +621,7 @@ mod tests {
                 cc = (cc + 1) & 0x0F;
             }
             let df = [body(2)[100 ..].to_vec(), body(3)].concat();
-            let next = bb_packet(2, PLP, &bbframe(false, Some(87), &df));
+            let next = bb_packet(1, PLP, &bbframe(false, Some(87), &df));
             assert_eq!(feed(&mut dec, &pack(&[next], &mut cc)), up(3), "{pusi}");
         }
     }
@@ -565,11 +645,16 @@ mod tests {
         let mut dec = T2miDecoder::new(PLP);
         let mut cc = 0;
         let pkts = pack(
-            &[bb_packet(0, 2, &bbframe(false, Some(0), &body(1)))],
+            &[
+                bb_packet(37, 2, &bbframe(false, Some(0), &body(1))),
+                bb_packet(38, PLP, &bbframe(false, Some(0), &body(2))),
+            ],
             &mut cc,
         );
         feed(&mut dec, &pkts[.. pkts.len() - 1]);
+        assert_eq!(dec.packet_count, Some(37));
         dec.reset();
+        assert_eq!(dec.packet_count, None);
         assert_eq!(dec.section_len, 0);
         assert!(dec.push(&pkts[pkts.len() - 1]).is_empty());
         assert_eq!(dec.take_foreign_plp(), None);
