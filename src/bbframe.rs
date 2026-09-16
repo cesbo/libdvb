@@ -6,7 +6,7 @@
 //! efficiency mode (signalled by the mode bit xored into the CRC-8 field) the sync byte is
 //! removed and the UP is 187 bytes, optionally followed by a null packet deletion counter. The
 //! decoder restores the `0x47` sync byte, carries a UP split across frames and returns whole TS
-//! packets.
+//! packets. Only byte-aligned lengths and offsets are supported.
 //!
 //! [`BbFrameDecoder`] also reassembles the frames DigitalDevices DVB-S2 frontends deliver with the
 //! BBFrames bit set in `DTV_STREAM_ID`: each BBFRAME is fragmented into TS packets on
@@ -246,23 +246,31 @@ impl Extractor {
             return;
         }
 
+        let upl_bits = u16::from_be_bytes([h[2], h[3]]);
+        let dfl_bits = u16::from_be_bytes([h[4], h[5]]);
+        let syncd_bits = u16::from_be_bytes([h[7], h[8]]);
+        if (mode == 0 && upl_bits & 7 != 0)
+            || dfl_bits & 7 != 0
+            || (syncd_bits != 0xFFFF && syncd_bits & 7 != 0)
+        {
+            self.carry_len = 0;
+            return;
+        }
+
         // UP as transmitted and the part of it inside the packet: the whole packet behind a
         // CRC-8 in normal mode, 187 bytes without the sync byte plus the null packet deletion
         // counter in high efficiency mode
         let (up_len, body) = if mode == 0 {
-            (
-                usize::from(u16::from_be_bytes([h[2], h[3]]) >> 3),
-                PACKET_SIZE,
-            )
+            (usize::from(upl_bits >> 3), PACKET_SIZE)
         } else {
             (
                 PACKET_SIZE - 1 + usize::from(h[0] >> 2 & 1),
                 PACKET_SIZE - 1,
             )
         };
-        let dfl = usize::from(u16::from_be_bytes([h[4], h[5]]) >> 3);
+        let dfl = usize::from(dfl_bits >> 3);
         // SYNCD 0xFFFF: no UP starts in this data field
-        let syncd = match u16::from_be_bytes([h[7], h[8]]) {
+        let syncd = match syncd_bits {
             0xFFFF => None,
             bits => Some(usize::from(bits >> 3)),
         };
@@ -690,6 +698,47 @@ mod tests {
             pkts.extend(fragments(&frame(ISI, 188, 0, &up(3)), &mut cc));
             assert!(feed(&mut dec, &pkts).is_empty());
         }
+    }
+
+    #[test]
+    fn bit_alignment() {
+        for (mode, field) in [(0, 3), (0, 5), (0, 8), (1, 5), (1, 8)] {
+            let offset = usize::from(mode);
+            let make_frame = |syncd, df: &[u8]| {
+                if mode == 0 {
+                    frame(ISI, 188, syncd, df)
+                } else {
+                    frame_hem(false, Some(syncd), df)
+                }
+            };
+            for bit in [1, 2, 4] {
+                let mut dec = BbFrameDecoder::new(ISI);
+                assert!(
+                    dec.push_frame(&make_frame(0, &up(1)[offset .. 100]))
+                        .is_empty()
+                );
+
+                let mut bad = make_frame(0, &up(9)[offset ..]);
+                bad[field] |= bit;
+                bad[9] = crc8(&bad[.. 9]) ^ mode;
+                assert!(dec.push_frame(&bad).is_empty(), "{mode}, {field}, {bit}");
+
+                let df = [up(2)[100 ..].to_vec(), up(3)[offset ..].to_vec()].concat();
+                assert_eq!(dec.push_frame(&make_frame(88, &df)), restored(3));
+            }
+        }
+    }
+
+    #[test]
+    fn hem_issy() {
+        let mut dec = BbFrameDecoder::new(ISI);
+        let mut f = frame_hem(false, Some(0), &up(1)[1 ..]);
+        f[0] |= 0x08;
+        f[2] = 0x01;
+        f[3] = 0x07;
+        f[6] = 0x23;
+        f[9] = crc8(&f[.. 9]) ^ 0x01;
+        assert_eq!(dec.push_frame(&f), restored(1));
     }
 
     #[test]
