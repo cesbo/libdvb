@@ -11,7 +11,10 @@
 //! 6008, which carries a second DAC) and silently ignores them on every
 //! other channel. `MODULATOR_INPUT_BITRATE` is the only per-channel
 //! property; it sets the DMA drain pace of the channel FIFO and takes
-//! effect when the first write starts the DMA.
+//! effect when the first write starts the DMA. It is a ceiling, not a rate
+//! the input must match: on a 6004 an input below the channel rate is padded
+//! with null packets by the card, and one above it is held back to the
+//! channel rate by the FIFO, in both cases without losing a packet.
 //!
 //! The 6032 and 6001 are configured by the vendor SPI tool and must not
 //! receive card-level properties: `config_srate` and `config_gain` write

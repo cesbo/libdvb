@@ -47,9 +47,10 @@ pub const MODULATOR_SYMBOL_RATE: u32 = 5;
 /// when the first write starts the DMA.
 pub const MODULATOR_INPUT_BITRATE: u32 = 33;
 
-/// Card-level. AD9789 channel gain 0..=120, anything above is EPERM.
-/// Written to all four channel gain registers without checking the card, so
-/// it must never reach a 6032/6001.
+/// Card-level. AD9789 channel gain 0..=120, anything above is EPERM; 60 at
+/// probe. Nonlinear: on a 6004, 20 to 120 spans about 16 dB, most of it
+/// below 60. Written to all four channel gain registers without checking the
+/// card, so it must never reach a 6032/6001.
 pub const MODULATOR_GAIN: u32 = 35;
 
 /// Channel 0 only (not 4). J.83B interleave mode 0..=16 on the 6014,
