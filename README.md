@@ -10,6 +10,10 @@ Delivery systems:
 
 SEC: DiSEqC 1.0/1.1, Unicable I (EN 50494), Unicable II (EN 50607).
 
+Modulators (transmit): DigitalDevices Octopus MOD / RESI / SDR (DVB-C,
+DVB-T), TBS tbsmod PCIe cards (DVB-C, DVB-T, J.83B, ATSC, ISDB-T, ASI),
+HiDes UT-100 USB sticks (DVB-T).
+
 DVB-CI (EN 50221): runtime-neutral `CiController` with link, transport and
 session layers and the Resource Manager, Application Information,
 Conditional Access Support, Host Control, Date-Time and MMI resources.
@@ -94,6 +98,41 @@ The BBFRAMEs inside go through the same extractor as `BbFrameDecoder`, in
 normal and high efficiency mode; `take_foreign_plp()` reports each other
 PLP once.
 
+## Modulators
+
+Transmit support lives in `modulator`. The vendor-neutral part is the
+DVB-T channel parameter types (`DvbtBandwidth`, `DvbtConstellation`,
+`DvbtCodeRate`, `DvbtGuard`) and the net TS bitrate math
+(`dvbt_ts_bitrate()`, `dvbc_ts_bitrate()`). Device access is one submodule
+per vendor: every family has its own UAPI, and the same numeric property
+code can mean different things, so there are no cross-vendor device
+constants.
+
+`modulator::dd` - DigitalDevices (`/dev/dvb/adapterN/modM`): the classic
+DVB-C cards through `DVB_MOD_SET` / `DVB_MOD_CHANNEL_SET` and the
+`MODULATOR_*` properties, the SDR cards through the MCI command interface
+(`setup_channels_cmd()`, `setup_output_cmd()`, `setup_stream_cmd()`). A
+read-only handle configures, the write-only one (`open_wr()`) carries the
+TS and starts the RF output. The classic cards pad a slow input with null
+packets; the SDR DVB-T path needs an exact CBR stream.
+
+`modulator::tbs` - TBS tbsmod cards (`/dev/tbsmodN/modM`): 6004/6008
+DVB-C, 6104 DVB-T, 6014 J.83B, 6034 ATSC, 6214 ISDB-T, 690b ASI. One
+write-only handle per channel carries the properties and the TS; opening
+enables the RF channel. Card-level properties (frequency, modulation,
+symbol rate, gain) are honored on channel 0 only, `MODULATOR_INPUT_BITRATE`
+is per channel and a ceiling on the DMA pace: the card pads a slower input
+with null packets and holds back a faster one.
+
+`modulator::it950x` - HiDes UT-100 (ITE IT9507, `/dev/usb-it950xN`, driver
+v16.11.10.1 or later): `driver_info()`, `acquire_channel()`,
+`set_modulation()`, `gain_range()` / `set_gain()`, `start_transfer()`,
+`write()` / `write_all()`, `stop_transfer()`. The chip pads a slower input
+with null packets, so the stream must be CBR at or below the channel rate.
+The gain is digital and deep attenuation costs MER. After an aborted
+session the URBs left in flight drain only once RF is on again, so wait
+the ring drain time after `set_modulation()` before `start_transfer()`.
+
 ## CI
 
 `CiController` handles CAM insertion/removal, reset, `CREATE_TC`, transport
@@ -128,7 +167,8 @@ calling `shutdown()` stops the loop and closes the device.
 
 Compiled examples in `examples/`: `feinfo` and `femon` (frontend
 information and status), `netinfo` (dvbnet), `cainfo` (prints the inserted
-CAMs and exits), `camenu` (interactive CAM menu).
+CAMs and exits), `camenu` (interactive CAM menu), `it950x_tx` and
+`tbsmod_tx` (transmit the TS from stdin through a HiDes or TBS modulator).
 
 ## File Descriptors
 
