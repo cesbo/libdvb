@@ -6,6 +6,7 @@
 //! family exposes its own UAPI - and lives in a submodule per vendor:
 //!
 //! * [`dd`] - DigitalDevices (Octopus MOD / RESI / SDR cards).
+//! * [`it950x`] - HiDes UT-100 (ITE IT9507 USB DVB-T sticks).
 //! * [`tbs`] - TBS (tbsmod PCIe cards).
 //!
 //! Vendor UAPIs share ancestry but disagree: the same numeric property code
@@ -13,6 +14,7 @@
 //! cross-vendor device constants exist at this level on purpose.
 
 pub mod dd;
+pub mod it950x;
 pub mod tbs;
 
 use std::os::fd::RawFd;

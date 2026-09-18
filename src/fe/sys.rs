@@ -160,18 +160,18 @@ impl FeInfo {
 
     /// Frontend name up to its terminator, with invalid UTF-8 replaced.
     pub fn name_lossy(&self) -> Cow<'_, str> {
-        let end = self
-            .name
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(self.name.len());
-
-        String::from_utf8_lossy(&self.name[.. end])
+        cstr_lossy(&self.name)
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut FeInfo {
         self as *mut _
     }
+}
+
+/// A fixed-width kernel string up to its terminator, with invalid UTF-8 replaced.
+pub(crate) fn cstr_lossy(field: &[u8]) -> Cow<'_, str> {
+    let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+    String::from_utf8_lossy(&field[.. end])
 }
 
 /// DiSEqC master command. Check out the DiSEqC bus spec available on http://www.eutelsat.org/ for
