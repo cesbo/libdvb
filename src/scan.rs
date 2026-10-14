@@ -80,10 +80,13 @@ fn read_mac(adapter: u32, device: u32) -> Option<String> {
     Some(mac)
 }
 
-/// Device nodes `wanted` accepts that a process holds open for writing, from a walk over
-/// /proc/*/fd as fuser does it.
-fn held_for_write(wanted: impl Fn(&Path) -> bool) -> HashSet<PathBuf> {
+/// The `wanted` device nodes a process holds open for writing, from a walk over /proc/*/fd as
+/// fuser does it; no walk when nothing is wanted.
+fn held_for_write(wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
     let mut result = HashSet::new();
+    if wanted.is_empty() {
+        return result;
+    }
 
     let Ok(procs) = std::fs::read_dir("/proc") else {
         return result;
@@ -105,7 +108,9 @@ fn held_for_write(wanted: impl Fn(&Path) -> bool) -> HashSet<PathBuf> {
                 continue;
             };
 
-            if wanted(&target) && opened_for_write(&proc_dir.join("fdinfo").join(fd.file_name())) {
+            if wanted.contains(target.as_path())
+                && opened_for_write(&proc_dir.join("fdinfo").join(fd.file_name()))
+            {
                 result.insert(target);
             }
         }
@@ -134,7 +139,7 @@ fn opened_for_write(fdinfo: &Path) -> bool {
 pub fn probe(adapter: u32, device: u32) -> FeProbe {
     let root = Path::new("/dev/dvb");
     let path = root.join(format!("adapter{}/frontend{}", adapter, device));
-    let busy = held_for_write(|node| node == path).contains(&path);
+    let busy = held_for_write(&HashSet::from([path.as_path()])).contains(&path);
 
     probe_path(adapter, device, &path, busy)
 }
@@ -183,11 +188,11 @@ fn probe_path(adapter: u32, device: u32, path: &Path, busy: bool) -> FeProbe {
     result
 }
 
-/// Probes every frontend below `root`, in readdir order; `held` lists the nodes held for writing.
+/// Frontends below `root` as adapter, device and path, in readdir order.
 ///
 /// A frontend without demux and dvr nodes next to it is skipped: it cannot deliver a transport
 /// stream, so no caller can use it.
-fn frontends_in(root: &Path, held: &HashSet<PathBuf>) -> Vec<FeProbe> {
+fn frontend_nodes(root: &Path) -> Vec<(u32, u32, PathBuf)> {
     let mut result = Vec::new();
 
     for adapter_name in entries_with_prefix(root, "adapter") {
@@ -203,23 +208,25 @@ fn frontends_in(root: &Path, held: &HashSet<PathBuf>) -> Vec<FeProbe> {
                 continue;
             }
 
-            let path = adapter_dir.join(&frontend_name);
-            let busy = held.contains(&path);
-            result.push(probe_path(adapter, device, &path, busy));
+            result.push((adapter, device, adapter_dir.join(&frontend_name)));
         }
     }
 
     result
 }
 
+fn probe_nodes(nodes: &[(u32, u32, PathBuf)], held: &HashSet<PathBuf>) -> Vec<FeProbe> {
+    nodes
+        .iter()
+        .map(|(adapter, device, path)| probe_path(*adapter, *device, path, held.contains(path)))
+        .collect()
+}
+
 /// Probes every frontend under /dev/dvb, in readdir order.
 pub fn scan() -> Vec<FeProbe> {
-    let root = Path::new("/dev/dvb");
-    if !root.is_dir() {
-        return Vec::new();
-    }
-
-    frontends_in(root, &held_for_write(|node| node.starts_with(root)))
+    let nodes = frontend_nodes(Path::new("/dev/dvb"));
+    let held = held_for_write(&nodes.iter().map(|(_, _, path)| path.as_path()).collect());
+    probe_nodes(&nodes, &held)
 }
 
 /// Vendor family of a modulator node; each one has its own UAPI under [`crate::modulator`].
@@ -305,7 +312,7 @@ fn mark_held(nodes: Vec<(ModNode, PathBuf)>, held: &HashSet<PathBuf>) -> Vec<Mod
 
 fn modulators_in(dev: &Path) -> Vec<ModNode> {
     let nodes = modulator_nodes(dev);
-    let held = held_for_write(|path| nodes.iter().any(|(_, node)| node == path));
+    let held = held_for_write(&nodes.iter().map(|(_, path)| path.as_path()).collect());
     mark_held(nodes, &held)
 }
 
@@ -329,18 +336,22 @@ impl Inventory {
     }
 
     fn scan_in(dev: &Path) -> Self {
-        let dvb = dev.join("dvb");
-        let nodes = modulator_nodes(dev);
-        let held = held_for_write(|path| {
-            path.starts_with(&dvb) || nodes.iter().any(|(_, node)| node == path)
-        });
+        let frontends = frontend_nodes(&dev.join("dvb"));
+        let modulators = modulator_nodes(dev);
+        let held = held_for_write(
+            &frontends
+                .iter()
+                .map(|(_, _, path)| path.as_path())
+                .chain(modulators.iter().map(|(_, path)| path.as_path()))
+                .collect(),
+        );
 
-        let mut receivers = frontends_in(&dvb, &held);
+        let mut receivers = probe_nodes(&frontends, &held);
         receivers.sort_by_key(|probe| (probe.adapter, probe.device));
 
         Self {
             receivers,
-            modulators: mark_held(nodes, &held),
+            modulators: mark_held(modulators, &held),
         }
     }
 }
@@ -413,17 +424,42 @@ mod tests {
         let dir = temp_tree("held").canonicalize().unwrap();
         let rw = dir.join("rw");
         let ro = dir.join("ro");
+        let other = dir.join("other");
         touch(rw.clone());
         touch(ro.clone());
+        touch(other.clone());
 
         let _rw = std::fs::OpenOptions::new().write(true).open(&rw).unwrap();
         let _ro = File::open(&ro).unwrap();
+        let _other = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&other)
+            .unwrap();
 
-        let held = held_for_write(|node| node.starts_with(&dir));
-        assert!(held.contains(&rw));
-        assert!(!held.contains(&ro));
+        let held = held_for_write(&HashSet::from([rw.as_path(), ro.as_path()]));
+        assert_eq!(held, HashSet::from([rw.clone()]));
+        assert!(held_for_write(&HashSet::new()).is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frontend_nodes_need_demux_and_dvr() {
+        let dvb = temp_tree("frontends");
+        for node in [
+            "adapter0/frontend0",
+            "adapter0/demux0",
+            "adapter0/dvr0",
+            "adapter1/frontend0",
+            "adapter1/demux0",
+        ] {
+            touch(dvb.join(node));
+        }
+
+        let nodes = frontend_nodes(&dvb);
+        assert_eq!(nodes, [(0, 0, dvb.join("adapter0/frontend0"))]);
+
+        let _ = std::fs::remove_dir_all(&dvb);
     }
 
     #[test]
