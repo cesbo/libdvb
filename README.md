@@ -142,10 +142,11 @@ found by name and never opened: `/dev/dvb/adapterN/modM`,
 `/dev/tbsmodN/modM`, `/dev/usb-it950xN`). Both lists are sorted by adapter
 and device. `modulators()` lists the nodes alone.
 
-A frontend is probed read-only, so the probe never wakes it. `busy` tells
-whether some process, this one included, holds the frontend open for
-writing, found by a walk over `/proc/*/fd` as `fuser` does it. Processes of
-other users are seen only with root or `CAP_SYS_PTRACE`.
+A frontend is probed read-only, so the probe never wakes it. `busy` of a
+frontend or a modulator node tells whether some process, this one included,
+holds it open for writing, found by a walk over `/proc/*/fd` as `fuser` does
+it; `Inventory::scan()` walks once for both lists. Processes of other users
+are seen only with root or `CAP_SYS_PTRACE`.
 
 ## CI
 

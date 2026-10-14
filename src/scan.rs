@@ -80,9 +80,9 @@ fn read_mac(adapter: u32, device: u32) -> Option<String> {
     Some(mac)
 }
 
-/// Device nodes below `dir` that a process holds open for writing, from a walk over
+/// Device nodes `wanted` accepts that a process holds open for writing, from a walk over
 /// /proc/*/fd as fuser does it.
-fn held_for_write(dir: &Path) -> HashSet<PathBuf> {
+fn held_for_write(wanted: impl Fn(&Path) -> bool) -> HashSet<PathBuf> {
     let mut result = HashSet::new();
 
     let Ok(procs) = std::fs::read_dir("/proc") else {
@@ -105,9 +105,7 @@ fn held_for_write(dir: &Path) -> HashSet<PathBuf> {
                 continue;
             };
 
-            if target.starts_with(dir)
-                && opened_for_write(&proc_dir.join("fdinfo").join(fd.file_name()))
-            {
+            if wanted(&target) && opened_for_write(&proc_dir.join("fdinfo").join(fd.file_name())) {
                 result.insert(target);
             }
         }
@@ -136,7 +134,7 @@ fn opened_for_write(fdinfo: &Path) -> bool {
 pub fn probe(adapter: u32, device: u32) -> FeProbe {
     let root = Path::new("/dev/dvb");
     let path = root.join(format!("adapter{}/frontend{}", adapter, device));
-    let busy = held_for_write(root).contains(&path);
+    let busy = held_for_write(|node| node == path).contains(&path);
 
     probe_path(adapter, device, &path, busy)
 }
@@ -185,18 +183,12 @@ fn probe_path(adapter: u32, device: u32, path: &Path, busy: bool) -> FeProbe {
     result
 }
 
-/// Probes every frontend below `root`, in readdir order.
+/// Probes every frontend below `root`, in readdir order; `held` lists the nodes held for writing.
 ///
 /// A frontend without demux and dvr nodes next to it is skipped: it cannot deliver a transport
 /// stream, so no caller can use it.
-fn frontends_in(root: &Path) -> Vec<FeProbe> {
+fn frontends_in(root: &Path, held: &HashSet<PathBuf>) -> Vec<FeProbe> {
     let mut result = Vec::new();
-
-    if !root.is_dir() {
-        return result;
-    }
-
-    let held = held_for_write(root);
 
     for adapter_name in entries_with_prefix(root, "adapter") {
         let adapter = last_int(&adapter_name);
@@ -222,7 +214,12 @@ fn frontends_in(root: &Path) -> Vec<FeProbe> {
 
 /// Probes every frontend under /dev/dvb, in readdir order.
 pub fn scan() -> Vec<FeProbe> {
-    frontends_in(Path::new("/dev/dvb"))
+    let root = Path::new("/dev/dvb");
+    if !root.is_dir() {
+        return Vec::new();
+    }
+
+    frontends_in(root, &held_for_write(|node| node.starts_with(root)))
 }
 
 /// Vendor family of a modulator node; each one has its own UAPI under [`crate::modulator`].
@@ -242,45 +239,74 @@ pub struct ModNode {
     pub vendor: ModVendor,
     pub adapter: u32,
     pub device: u32,
+    /// Whether a process holds the node open for writing, this one included. A process the caller
+    /// may not inspect (another user's, without root or `CAP_SYS_PTRACE`) is not seen.
+    pub busy: bool,
 }
 
-/// Modulator nodes below `dev`, sorted by vendor, adapter and device.
-fn modulators_in(dev: &Path) -> Vec<ModNode> {
+/// Modulator nodes below `dev` with their paths, sorted by vendor, adapter and device; `busy` is
+/// not filled yet.
+fn modulator_nodes(dev: &Path) -> Vec<(ModNode, PathBuf)> {
     let mut result = Vec::new();
+    let mut push = |vendor, adapter, device, path| {
+        let node = ModNode {
+            vendor,
+            adapter,
+            device,
+            busy: false,
+        };
+        result.push((node, path));
+    };
 
     let dvb = dev.join("dvb");
     for adapter_name in entries_with_prefix(&dvb, "adapter") {
-        let adapter = last_int(&adapter_name);
-        for mod_name in entries_with_prefix(&dvb.join(&adapter_name), "mod") {
-            result.push(ModNode {
-                vendor: ModVendor::Dd,
-                adapter,
-                device: last_int(&mod_name),
-            });
+        let adapter_dir = dvb.join(&adapter_name);
+        for mod_name in entries_with_prefix(&adapter_dir, "mod") {
+            let path = adapter_dir.join(&mod_name);
+            push(
+                ModVendor::Dd,
+                last_int(&adapter_name),
+                last_int(&mod_name),
+                path,
+            );
         }
     }
 
     for card_name in entries_with_prefix(dev, "tbsmod") {
-        let adapter = last_int(&card_name);
-        for mod_name in entries_with_prefix(&dev.join(&card_name), "mod") {
-            result.push(ModNode {
-                vendor: ModVendor::Tbs,
-                adapter,
-                device: last_int(&mod_name),
-            });
+        let card_dir = dev.join(&card_name);
+        for mod_name in entries_with_prefix(&card_dir, "mod") {
+            let path = card_dir.join(&mod_name);
+            push(
+                ModVendor::Tbs,
+                last_int(&card_name),
+                last_int(&mod_name),
+                path,
+            );
         }
     }
 
     for name in entries_with_prefix(dev, "usb-it950x") {
-        result.push(ModNode {
-            vendor: ModVendor::It950x,
-            adapter: last_int(&name),
-            device: 0,
-        });
+        push(ModVendor::It950x, last_int(&name), 0, dev.join(&name));
     }
 
     result.sort();
     result
+}
+
+fn mark_held(nodes: Vec<(ModNode, PathBuf)>, held: &HashSet<PathBuf>) -> Vec<ModNode> {
+    nodes
+        .into_iter()
+        .map(|(mut node, path)| {
+            node.busy = held.contains(&path);
+            node
+        })
+        .collect()
+}
+
+fn modulators_in(dev: &Path) -> Vec<ModNode> {
+    let nodes = modulator_nodes(dev);
+    let held = held_for_write(|path| nodes.iter().any(|(_, node)| node == path));
+    mark_held(nodes, &held)
 }
 
 /// Lists the modulator nodes under /dev without opening them.
@@ -303,12 +329,18 @@ impl Inventory {
     }
 
     fn scan_in(dev: &Path) -> Self {
-        let mut receivers = frontends_in(&dev.join("dvb"));
+        let dvb = dev.join("dvb");
+        let nodes = modulator_nodes(dev);
+        let held = held_for_write(|path| {
+            path.starts_with(&dvb) || nodes.iter().any(|(_, node)| node == path)
+        });
+
+        let mut receivers = frontends_in(&dvb, &held);
         receivers.sort_by_key(|probe| (probe.adapter, probe.device));
 
         Self {
             receivers,
-            modulators: modulators_in(dev),
+            modulators: mark_held(nodes, &held),
         }
     }
 }
@@ -341,7 +373,7 @@ mod tests {
 
     #[test]
     fn modulator_nodes_by_name() {
-        let dev = temp_tree("mods");
+        let dev = temp_tree("mods").canonicalize().unwrap();
         touch(dev.join("dvb/adapter2/mod1"));
         touch(dev.join("dvb/adapter2/mod0"));
         touch(dev.join("dvb/adapter0/frontend0"));
@@ -350,19 +382,26 @@ mod tests {
         touch(dev.join("usb-it950x4"));
         touch(dev.join("video0"));
 
-        let node = |vendor, adapter, device| ModNode {
+        let _writer = std::fs::OpenOptions::new()
+            .write(true)
+            .open(dev.join("tbsmod0/mod3"))
+            .unwrap();
+        let _reader = File::open(dev.join("usb-it950x4")).unwrap();
+
+        let node = |vendor, adapter, device, busy| ModNode {
             vendor,
             adapter,
             device,
+            busy,
         };
         assert_eq!(
             modulators_in(&dev),
             vec![
-                node(ModVendor::Dd, 2, 0),
-                node(ModVendor::Dd, 2, 1),
-                node(ModVendor::Tbs, 0, 3),
-                node(ModVendor::Tbs, 1, 0),
-                node(ModVendor::It950x, 4, 0),
+                node(ModVendor::Dd, 2, 0, false),
+                node(ModVendor::Dd, 2, 1, false),
+                node(ModVendor::Tbs, 0, 3, true),
+                node(ModVendor::Tbs, 1, 0, false),
+                node(ModVendor::It950x, 4, 0, false),
             ]
         );
 
@@ -380,7 +419,7 @@ mod tests {
         let _rw = std::fs::OpenOptions::new().write(true).open(&rw).unwrap();
         let _ro = File::open(&ro).unwrap();
 
-        let held = held_for_write(&dir);
+        let held = held_for_write(|node| node.starts_with(&dir));
         assert!(held.contains(&rw));
         assert!(!held.contains(&ro));
 
