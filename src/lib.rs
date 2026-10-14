@@ -62,6 +62,9 @@ pub use fe::{
 pub use net::NetDevice;
 pub use scan::{
     FeProbe,
+    Inventory,
+    ModNode,
+    ModVendor,
     scan,
 };
 pub use t2mi::T2miDecoder;

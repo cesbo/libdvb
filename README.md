@@ -133,6 +133,20 @@ The gain is digital and deep attenuation costs MER. After an aborted
 session the URBs left in flight drain only once RF is on again, so wait
 the ring drain time after `set_modulation()` before `start_transfer()`.
 
+## Inventory
+
+`Inventory::scan()` lists the DVB devices of the host in one object: the
+probed frontends of `/dev/dvb` (`receivers`, the `FeProbe` entries of
+`scan()`) and the modulator nodes of every supported family (`modulators`,
+found by name and never opened: `/dev/dvb/adapterN/modM`,
+`/dev/tbsmodN/modM`, `/dev/usb-it950xN`). Both lists are sorted by adapter
+and device. `modulators()` lists the nodes alone.
+
+A frontend is probed read-only, so the probe never wakes it. `busy` tells
+whether some process, this one included, holds the frontend open for
+writing, found by a walk over `/proc/*/fd` as `fuser` does it. Processes of
+other users are seen only with root or `CAP_SYS_PTRACE`.
+
 ## CI
 
 `CiController` handles CAM insertion/removal, reset, `CREATE_TC`, transport
