@@ -65,7 +65,9 @@ TS tap on one PID (8192 for the whole stream), buffer size, start/stop.
 ## DVR
 
 `DvrDevice` opens `/dev/dvb/adapterN/dvrM` read-only and blocking. It
-implements `Read`; `set_buffer_size()` wraps `DMX_SET_BUFFER_SIZE`.
+implements `Read`; `set_buffer_size()` wraps `DMX_SET_BUFFER_SIZE`;
+`set_nonblocking()` sets or clears `O_NONBLOCK` on the descriptor, so a
+readiness-driven reader gets `WouldBlock` instead of waiting.
 
 ## NetDevice
 

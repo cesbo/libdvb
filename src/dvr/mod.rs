@@ -16,7 +16,13 @@ use std::{
     },
 };
 
-use crate::error::Result;
+use crate::{
+    error::Result,
+    fd::{
+        file_status_flags,
+        set_file_status_flags,
+    },
+};
 
 /// A reference to the logical DVR device.
 ///
@@ -70,5 +76,46 @@ impl DvrDevice {
         unsafe { ioctl_call(self.as_raw_fd(), buffer_size as _) }?;
 
         Ok(())
+    }
+
+    /// Sets or clears `O_NONBLOCK` on the DVR descriptor.
+    ///
+    /// The device opens blocking. In non-blocking mode a read on an empty ring buffer returns
+    /// `WouldBlock` instead of waiting for packets, which is what readiness-driven consumers
+    /// such as an async reactor need.
+    pub fn set_nonblocking(&self, enabled: bool) -> Result<()> {
+        let flags = file_status_flags(self.as_raw_fd())?;
+        let flags = if enabled {
+            flags | ::nix::libc::O_NONBLOCK
+        } else {
+            flags & !::nix::libc::O_NONBLOCK
+        };
+        set_file_status_flags(self.as_raw_fd(), flags)?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonblocking_flag() {
+        let dvr = DvrDevice {
+            file: File::open("/dev/null").unwrap(),
+        };
+
+        dvr.set_nonblocking(true).unwrap();
+        assert_ne!(
+            file_status_flags(dvr.as_raw_fd()).unwrap() & ::nix::libc::O_NONBLOCK,
+            0
+        );
+
+        dvr.set_nonblocking(false).unwrap();
+        assert_eq!(
+            file_status_flags(dvr.as_raw_fd()).unwrap() & ::nix::libc::O_NONBLOCK,
+            0
+        );
     }
 }
