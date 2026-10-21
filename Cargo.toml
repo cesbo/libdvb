@@ -1,6 +1,6 @@
 [package]
 name = "libdvb"
-version = "0.20.0"
+version = "0.21.0"
 description = "Interface for DVB-API v5 devices in Linux"
 authors = ["Cesbo Developers Team <info@cesbo.com>"]
 license = "MIT"
@@ -20,6 +20,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["net", "time", "sync", "macros"], optional = true }
 
 [features]
+fixtures = []
 tokio = ["dep:tokio"]
 
 [dev-dependencies]

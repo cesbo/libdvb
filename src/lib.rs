@@ -4,6 +4,8 @@ pub mod dmx;
 pub mod dvr;
 pub mod error;
 pub mod fe;
+#[cfg(any(test, feature = "fixtures"))]
+pub mod fixtures;
 pub mod modulator;
 pub mod net;
 pub mod scan;

@@ -30,9 +30,9 @@ pub const BBFRAME_PID: u16 = 270;
 const FRAME_MAX: usize = 58192 / 8;
 const HEADER_LEN: usize = 10;
 /// Fragment prefix: `00 80 00`, length, counter
-const PREFIX_LEN: usize = 9;
-const FRAGMENT_LEN_MAX: u8 = 0xB4;
-const FRAGMENT_FIRST: u8 = 0xB8;
+pub(crate) const PREFIX_LEN: usize = 9;
+pub(crate) const FRAGMENT_LEN_MAX: u8 = 0xB4;
+pub(crate) const FRAGMENT_FIRST: u8 = 0xB8;
 /// UPs from an 8192-byte T2-MI packet, the rest of its completing TS payload and the carried UP
 const OUT_MAX: usize = 45 * PACKET_SIZE;
 
@@ -331,61 +331,20 @@ fn emit(out: &mut [u8], out_len: &mut usize, up: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::{
+        bbframe::{
+            dd_fragment as fragment,
+            dd_fragments as fragments,
+            header,
+            hem_frame,
+            normal_frame as frame,
+            restored,
+            up,
+        },
+        concat,
+    };
 
     const ISI: u8 = 1;
-
-    /// UP: a TS packet whose sync byte was replaced by the modulator
-    fn up(tag: u8) -> [u8; PACKET_SIZE] {
-        let mut p = [0u8; PACKET_SIZE];
-        p[0] = 0x11 ^ tag;
-        p[1] = 0x01;
-        p[2] = tag;
-        p[3] = 0x10;
-        for (i, b) in p[4 ..].iter_mut().enumerate() {
-            *b = (i as u8).wrapping_mul(tag).wrapping_add(7);
-        }
-        p
-    }
-
-    fn header(isi: u8, upl: u16, dfl: u16, syncd: u16) -> [u8; HEADER_LEN] {
-        let mut h = [0u8; HEADER_LEN];
-        h[0] = 0xC0;
-        h[1] = isi;
-        h[2 .. 4].copy_from_slice(&(upl << 3).to_be_bytes());
-        h[4 .. 6].copy_from_slice(&(dfl << 3).to_be_bytes());
-        h[6] = 0x47;
-        h[7 .. 9].copy_from_slice(&(syncd << 3).to_be_bytes());
-        h[9] = crc8(&h[.. 9]);
-        h
-    }
-
-    fn frame(isi: u8, upl: u16, syncd: u16, df: &[u8]) -> Vec<u8> {
-        let mut f = header(isi, upl, df.len() as u16, syncd).to_vec();
-        f.extend_from_slice(df);
-        f
-    }
-
-    fn fragment(cc: u8, slen: u8, count: u8, data: &[u8]) -> [u8; PACKET_SIZE] {
-        let mut p = [0xFFu8; PACKET_SIZE];
-        p[0] = 0x47;
-        p[1 .. 3].copy_from_slice(&BBFRAME_PID.to_be_bytes());
-        p[3] = 0x10 | (cc & 0x0F);
-        p[4 .. 7].copy_from_slice(&[0x00, 0x80, 0x00]);
-        p[7] = slen;
-        p[8] = count;
-        p[PREFIX_LEN .. PREFIX_LEN + data.len()].copy_from_slice(data);
-        p
-    }
-
-    fn fragments(frame: &[u8], cc: &mut u8) -> Vec<[u8; PACKET_SIZE]> {
-        let mut out = Vec::new();
-        for (n, chunk) in frame.chunks(usize::from(FRAGMENT_LEN_MAX) - 1).enumerate() {
-            let count = if n == 0 { FRAGMENT_FIRST } else { n as u8 };
-            out.push(fragment(*cc, chunk.len() as u8 + 1, count, chunk));
-            *cc = (*cc + 1) & 0x0F;
-        }
-        out
-    }
 
     fn feed(dec: &mut BbFrameDecoder, pkts: &[[u8; PACKET_SIZE]]) -> Vec<u8> {
         let mut out = Vec::new();
@@ -393,16 +352,6 @@ mod tests {
             out.extend_from_slice(dec.push(p));
         }
         out
-    }
-
-    fn restored(tag: u8) -> [u8; PACKET_SIZE] {
-        let mut p = up(tag);
-        p[0] = 0x47;
-        p
-    }
-
-    fn concat(ups: &[[u8; PACKET_SIZE]]) -> Vec<u8> {
-        ups.iter().flat_map(|p| p.iter().copied()).collect()
     }
 
     /// One aligned frame with three UPs followed by the first fragment of the next frame
@@ -781,21 +730,8 @@ mod tests {
         assert_eq!(dec.take_foreign_isi(), Some(5));
     }
 
-    /// High efficiency mode header: the mode bit is xored into the CRC-8 field
-    fn header_hem(npd: bool, dfl: u16, syncd: u16) -> [u8; HEADER_LEN] {
-        let mut h = [0u8; HEADER_LEN];
-        h[0] = 0xC0 | if npd { 0x04 } else { 0 };
-        h[1] = ISI;
-        h[4 .. 6].copy_from_slice(&(dfl << 3).to_be_bytes());
-        h[7 .. 9].copy_from_slice(&syncd.to_be_bytes());
-        h[9] = crc8(&h[.. 9]) ^ 0x01;
-        h
-    }
-
     fn frame_hem(npd: bool, syncd: Option<u16>, df: &[u8]) -> Vec<u8> {
-        let mut f = header_hem(npd, df.len() as u16, syncd.map_or(0xFFFF, |s| s << 3)).to_vec();
-        f.extend_from_slice(df);
-        f
+        hem_frame(ISI, npd, syncd, df)
     }
 
     #[test]

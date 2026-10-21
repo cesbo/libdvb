@@ -21,7 +21,7 @@ use crate::bbframe::Extractor;
 const SECTION_MAX: usize = 0x2000;
 const HEADER_LEN: usize = 6;
 const CRC_LEN: usize = 4;
-const TYPE_BASEBAND_FRAME: u8 = 0x00;
+pub(crate) const TYPE_BASEBAND_FRAME: u8 = 0x00;
 /// Baseband Frame payload prefix: frame_idx, plp_id, intl_frame_start
 const BBFRAME_PREFIX: usize = 3;
 
@@ -194,121 +194,41 @@ impl T2miDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::{
+        self,
+        bbframe::{
+            hem_frame,
+            normal_frame,
+            restored as up,
+        },
+        concat,
+        t2mi::{
+            bb_packet,
+            packet as t2mi_packet,
+        },
+    };
 
     const PLP: u8 = 1;
     const PID: u16 = 0x1000;
-
-    /// Complete 188-byte TS packet, including the sync byte
-    fn up(tag: u8) -> [u8; PACKET_SIZE] {
-        let mut p = [0u8; PACKET_SIZE];
-        p[0] = 0x47;
-        p[1] = 0x01;
-        p[2] = tag;
-        p[3] = 0x10;
-        for (i, b) in p[4 ..].iter_mut().enumerate() {
-            *b = (i as u8).wrapping_mul(tag).wrapping_add(3);
-        }
-        p
-    }
 
     fn body(tag: u8) -> Vec<u8> {
         up(tag)[1 ..].to_vec()
     }
 
-    fn concat(ups: &[[u8; PACKET_SIZE]]) -> Vec<u8> {
-        ups.iter().flat_map(|p| p.iter().copied()).collect()
-    }
-
-    /// BBFRAME in high efficiency mode
     fn bbframe(npd: bool, syncd: Option<u16>, df: &[u8]) -> Vec<u8> {
-        let mut h = [0u8; 10];
-        h[0] = 0xC0 | if npd { 0x04 } else { 0 };
-        h[4 .. 6].copy_from_slice(&((df.len() as u16) << 3).to_be_bytes());
-        h[7 .. 9].copy_from_slice(&syncd.map_or(0xFFFF, |s| s << 3).to_be_bytes());
-        h[9] = crate::bbframe::crc8(&h[.. 9]) ^ 0x01;
-        let mut f = h.to_vec();
-        f.extend_from_slice(df);
-        f
+        hem_frame(0, npd, syncd, df)
     }
 
-    /// BBFRAME in normal mode: 188-byte UPs with a CRC-8 in the sync position
     fn bbframe_normal(df: &[u8]) -> Vec<u8> {
-        let mut h = [0u8; 10];
-        h[0] = 0xC0;
-        h[2 .. 4].copy_from_slice(&(188u16 << 3).to_be_bytes());
-        h[4 .. 6].copy_from_slice(&((df.len() as u16) << 3).to_be_bytes());
-        h[6] = 0x47;
-        h[9] = crate::bbframe::crc8(&h[.. 9]);
-        let mut f = h.to_vec();
-        f.extend_from_slice(df);
-        f
-    }
-
-    fn t2mi_packet(kind: u8, count: u8, payload: &[u8]) -> Vec<u8> {
-        let bits = (payload.len() * 8) as u16;
-        let mut p = vec![kind, count, 0x00, 0x00];
-        p.extend_from_slice(&bits.to_be_bytes());
-        p.extend_from_slice(payload);
-        let crc = crc32b(&p);
-        p.extend_from_slice(&crc.to_be_bytes());
-        p
-    }
-
-    fn bb_packet(count: u8, plp: u8, frame: &[u8]) -> Vec<u8> {
-        let mut payload = vec![0x00, plp, 0x80];
-        payload.extend_from_slice(frame);
-        t2mi_packet(TYPE_BASEBAND_FRAME, count, &payload)
+        normal_frame(0, 188, 0, df)
     }
 
     fn ts_packet(pusi: bool, cc: u8, payload: &[u8]) -> [u8; PACKET_SIZE] {
-        let mut p = [0xFFu8; PACKET_SIZE];
-        p[0] = 0x47;
-        p[1 .. 3].copy_from_slice(&PID.to_be_bytes());
-        if pusi {
-            p[1] |= 0x40;
-        }
-        p[3] = 0x10 | (cc & 0x0F);
-        let stuffing = PACKET_SIZE - 4 - payload.len();
-        if stuffing > 0 {
-            p[3] |= 0x20;
-            p[4] = stuffing as u8 - 1;
-            if stuffing > 1 {
-                p[5] = 0;
-            }
-        }
-        p[4 + stuffing ..].copy_from_slice(payload);
-        p
+        fixtures::t2mi::ts_packet(PID, pusi, cc, payload)
     }
 
-    fn flush_full(pending: &mut Vec<u8>, out: &mut Vec<[u8; PACKET_SIZE]>, cc: &mut u8) {
-        while pending.len() >= 183 {
-            let n = pending.len().min(184);
-            out.push(ts_packet(false, *cc, &pending[.. n]));
-            *cc = (*cc + 1) & 0x0F;
-            pending.drain(.. n);
-        }
-    }
-
-    /// Encapsulates units in TS; pointer counts bytes before the first new unit after the pointer
     fn pack(units: &[Vec<u8>], cc: &mut u8) -> Vec<[u8; PACKET_SIZE]> {
-        let mut out = Vec::new();
-        let mut pending: Vec<u8> = Vec::new();
-        for unit in units {
-            flush_full(&mut pending, &mut out, cc);
-            let mut payload = vec![pending.len() as u8];
-            payload.extend_from_slice(&pending);
-            let take = unit.len().min(183 - pending.len());
-            payload.extend_from_slice(&unit[.. take]);
-            out.push(ts_packet(true, *cc, &payload));
-            *cc = (*cc + 1) & 0x0F;
-            pending = unit[take ..].to_vec();
-        }
-        flush_full(&mut pending, &mut out, cc);
-        if !pending.is_empty() {
-            out.push(ts_packet(false, *cc, &pending));
-            *cc = (*cc + 1) & 0x0F;
-        }
-        out
+        fixtures::t2mi::pack(PID, units, cc)
     }
 
     fn feed(dec: &mut T2miDecoder, pkts: &[[u8; PACKET_SIZE]]) -> Vec<u8> {

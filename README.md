@@ -100,6 +100,20 @@ The BBFRAMEs inside go through the same extractor as `BbFrameDecoder`, in
 normal and high efficiency mode; `take_foreign_plp()` reports each other
 PLP once.
 
+## Fixtures
+
+The `fixtures` feature adds `libdvb::fixtures`: deterministic builders of
+BBFRAMEs in normal and high efficiency mode, of their DigitalDevices
+fragment packets on `BBFRAME_PID` and of T2-MI packets with their TS
+carrier, for unit tests of code around `BbFrameDecoder` and `T2miDecoder`.
+The crate's own tests use the same module; it is not meant for production
+streams.
+
+```toml
+[dev-dependencies]
+libdvb = { version = "0.21", features = ["fixtures"] }
+```
+
 ## Modulators
 
 Transmit support lives in `modulator`. The vendor-neutral part is the
